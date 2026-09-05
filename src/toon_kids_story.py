@@ -148,13 +148,17 @@ Use this exact JSON:
 def generate_image(client, prompt, filename):
     full_prompt = f"""
 Create a vertical 9:16 image for a children's animated story.
-Style: premium cute 3D cartoon, colorful, cinematic soft lighting, expressive friendly animal characters,
-large readable facial expressions, polished family-animation look, original characters, no logos, no watermark.
+Style: premium cute 3D cartoon, colorful, cinematic soft lighting,
+expressive friendly animal characters, polished family-animation look.
+Original characters only. No logos, watermark, captions, subtitles,
+speech bubbles, or written words inside the image.
+
 Keep the character design consistent with this character bible:
 {prompt}
-Do not place captions, subtitles, speech bubbles, or written words inside the image.
-Compose the important characters in the center-safe area for a 9:16 YouTube Short.
+
+Compose important characters in the center-safe area for a 9:16 YouTube Short.
 """
+
     for attempt in range(3):
         try:
             response = client.models.generate_content(
@@ -164,21 +168,27 @@ Compose the important characters in the center-safe area for a 9:16 YouTube Shor
                     response_modalities=["IMAGE"],
                     image_config=types.ImageConfig(
                         aspect_ratio="9:16"
-        )
-    )
-)
-for part in response.parts:
-    if part.inline_data is not None:
-        part.as_image().save(filename)
-        return
+                    )
+                )
+            )
+
+            for part in response.parts:
+                if part.inline_data is not None:
+                    part.as_image().save(filename)
+                    return
+
             raise RuntimeError("Image model returned no image.")
-        except Exception as e:
-            if is_quota_error(e):
-                raise RuntimeError("Gemini image quota exhausted. Stopping.") from e
+
+        except Exception as exc:
+            if is_quota_error(exc):
+                raise RuntimeError(
+                    "Gemini image quota exhausted. Stopping."
+                ) from exc
+
             if attempt == 2:
                 raise
-            time.sleep(8 * (attempt + 1))
 
+            time.sleep(8 * (attempt + 1))
 def tts(story):
     import edge_tts
     text = " ".join(s["narration"] for s in story["scenes"]) + " " + story["moral"]
