@@ -162,9 +162,8 @@ Compose the important characters in the center-safe area for a 9:16 YouTube Shor
                 contents=full_prompt,
                 config=types.GenerateContentConfig(
                     response_modalities=["IMAGE"],
-                    response_format={"image": {"aspect_ratio": "9:16"}}
-                )
-            )
+                    image_config=types.ImageConfig(
+                        aspect_ratio="9:16"))
             for part in response.parts:
                 if part.inline_data is not None:
                     part.as_image().save(filename)
