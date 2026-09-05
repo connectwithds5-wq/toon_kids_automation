@@ -163,11 +163,14 @@ Compose the important characters in the center-safe area for a 9:16 YouTube Shor
                 config=types.GenerateContentConfig(
                     response_modalities=["IMAGE"],
                     image_config=types.ImageConfig(
-                        aspect_ratio="9:16"))
-            for part in response.parts:
-                if part.inline_data is not None:
-                    part.as_image().save(filename)
-                    return
+                        aspect_ratio="9:16"
+        )
+    )
+)
+for part in response.parts:
+    if part.inline_data is not None:
+        part.as_image().save(filename)
+        return
             raise RuntimeError("Image model returned no image.")
         except Exception as e:
             if is_quota_error(e):
