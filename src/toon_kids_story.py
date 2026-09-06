@@ -2,10 +2,10 @@ import os
 import re
 import json
 import time
-import hashlib
 import asyncio
 import subprocess
 import base64
+import secrets
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -46,47 +46,176 @@ RUN_SLOT = os.getenv(
     "manual"
 )
 
+# Energetic Hindi voice
 TTS_RATE = os.getenv(
     "TTS_RATE",
-    "+5%"
+    "+15%"
+)
+
+TTS_PITCH = os.getenv(
+    "TTS_PITCH",
+    "+2Hz"
 )
 
 
 # ============================================================
-# TOPICS
+# UNLIMITED-STYLE RANDOM TOPIC ENGINE
 # ============================================================
 
-TOPICS = [
-    "ईमानदार खरगोश और चमकदार डिब्बा",
-    "प्यासा कौआ और छोटी सी सीख",
-    "चतुर बंदर और लालची मगरमच्छ",
-    "नन्ही चिड़िया का बड़ा हौसला",
-    "शेर और छोटे चूहे की दोस्ती",
-    "कछुआ जिसने हार नहीं मानी",
-    "चींटी और बारिश का दिन",
-    "जादुई पेड़ और सच्चा बच्चा",
-    "गाँव का छोटा दीपक",
-    "भूला हुआ खिलौना और नन्हा मालिक",
-    "बिल्ली जिसने दोस्ती सीखी",
-    "नन्हा हाथी और पानी का तालाब",
-    "गिलहरी और खोया हुआ अखरोट",
-    "सुनहरी मछली और दयालु बच्चा",
-    "चाँद को पत्र लिखने वाली बच्ची",
-    "बारिश में भीगता छोटा पिल्ला",
-    "बगीचे का सबसे छोटा फूल",
-    "नन्हा हिरन और जंगल का रास्ता",
-    "झूठ बोलने वाला तोता",
-    "मददगार मधुमक्खी",
-    "गुस्सैल बादल और इंद्रधनुष",
-    "प्यारा भालू और शहद का छत्ता",
-    "नन्ही परी और खोई हुई घंटी",
-    "चतुर चूहे का अनोखा उपाय",
-    "पेड़ बचाने वाले बच्चों की टोली",
-    "नन्हा रोबोट और उसका पहला दोस्त",
-    "समुद्र किनारे मिली रहस्यमयी बोतल",
-    "रात में चमकता छोटा तारा",
-    "नन्ही बिल्ली और रंगीन पतंग",
-    "दादी की पुरानी जादुई घड़ी",
+CHARACTERS = [
+    "नन्हा खरगोश",
+    "शरारती बंदर",
+    "प्यारा हाथी",
+    "चतुर गिलहरी",
+    "नन्हा पिल्ला",
+    "रंगीन तोता",
+    "छोटी बिल्ली",
+    "बहादुर चूहा",
+    "नन्हा हिरन",
+    "मजेदार भालू",
+    "चंचल लोमड़ी",
+    "छोटी चिड़िया",
+    "नन्हा रोबोट",
+    "दयालु कछुआ",
+    "मुस्कुराती तितली",
+    "नन्हा पेंगुइन",
+    "जिज्ञासु बकरी",
+    "छोटा ड्रैगन",
+    "नटखट गिलहरी",
+    "नन्ही मछली",
+    "प्यारा पांडा",
+    "छोटा जिराफ",
+    "नन्हा घोड़ा",
+    "मजेदार मेंढक",
+    "छोटी मधुमक्खी",
+    "नन्हा उल्लू",
+    "चंचल बंदरिया",
+    "प्यारा भेड़ का बच्चा",
+    "नन्हा समुद्री घोड़ा",
+    "छोटा कंगारू"
+]
+
+PLACES = [
+    "जादुई जंगल",
+    "रंगीन गाँव",
+    "चमकता हुआ बगीचा",
+    "बादलों का शहर",
+    "समुद्र किनारा",
+    "इंद्रधनुषी पहाड़",
+    "रहस्यमयी तालाब",
+    "खिलौनों का शहर",
+    "चाँदनी वाला जंगल",
+    "फूलों की घाटी",
+    "सितारों की दुनिया",
+    "मजेदार स्कूल",
+    "जादुई बाजार",
+    "बारिश वाला जंगल",
+    "बर्फीली पहाड़ी",
+    "गुब्बारों की दुनिया",
+    "सतरंगी नदी",
+    "छोटा सा खेत",
+    "सूरजमुखी का बगीचा",
+    "चॉकलेट की दुनिया",
+    "बादलों के ऊपर का गाँव",
+    "समुद्र के नीचे की दुनिया",
+    "रंग-बिरंगी कैंडी की घाटी",
+    "चमकते फूलों का जंगल",
+    "जादुई रेलवे स्टेशन",
+    "पतंगों का शहर",
+    "संगीत वाला जंगल",
+    "खिलखिलाते बादलों की घाटी",
+    "रोबोटों का छोटा शहर",
+    "चाँद के पास का बगीचा"
+]
+
+OBJECTS = [
+    "चमकती चाबी",
+    "रहस्यमयी डिब्बा",
+    "उड़ने वाली पतंग",
+    "जादुई घंटी",
+    "सुनहरी गेंद",
+    "रंग बदलने वाला छाता",
+    "छोटी जादुई किताब",
+    "चमकता सितारा",
+    "बोलने वाला खिलौना",
+    "अनोखी बोतल",
+    "सतरंगी पंख",
+    "गायब होने वाली टोपी",
+    "जादुई घड़ी",
+    "चमकता सिक्का",
+    "छोटा खजाना",
+    "उड़ता गुब्बारा",
+    "रहस्यमयी नक्शा",
+    "मुस्कुराता हुआ पौधा",
+    "जादुई सीटी",
+    "चॉकलेट का पेड़",
+    "चमकदार पत्थर",
+    "रंग बदलने वाला फूल",
+    "बोलने वाला बैग",
+    "उड़ने वाली किताब",
+    "जादुई जूते",
+    "सतरंगी छड़ी",
+    "छोटा संगीत बॉक्स",
+    "गायब होने वाला खिलौना",
+    "चमकती हुई सीप",
+    "जादुई पेंसिल"
+]
+
+TWISTS = [
+    "जो अचानक बोलने लगता है",
+    "जो रास्ता दिखाता है",
+    "जो रंग बदलता है",
+    "जिसे सब ढूँढ रहे हैं",
+    "जो एक मजेदार राज छुपाता है",
+    "जो दोस्ती की परीक्षा लेता है",
+    "जिससे पूरा जंगल हैरान हो जाता है",
+    "जो एक छोटी समस्या को बड़ा रोमांच बना देता है",
+    "जो सिर्फ सच्चे दोस्त को दिखाई देता है",
+    "जो अचानक गायब हो जाता है",
+    "जो सबकी मदद मांगता है",
+    "जिसका राज आखिर में खुलता है",
+    "जो हँसते-हँसते सबको एक सीख देता है",
+    "जिसे वापस सही जगह पहुँचाना है",
+    "जो एक अनोखी दोस्ती की शुरुआत करता है",
+    "जो हर बार नई पहेली देता है",
+    "जो बहुत मजेदार निकलता है",
+    "जो एक खोए दोस्त तक पहुँचाता है",
+    "जो बारिश शुरू होते ही चमकने लगता है",
+    "जो खुशी बाँटना सिखाता है",
+    "जिससे एक मजेदार सरप्राइज मिलता है",
+    "जो पूरी कहानी बदल देता है",
+    "जिसके पीछे एक प्यारा सा रहस्य है",
+    "जो सबको मिलकर काम करना सिखाता है",
+    "जो एक छोटी गलती को शानदार एडवेंचर बना देता है",
+    "जो अंत में सबको हँसा देता है"
+]
+
+ACTIONS = [
+    "एक खोई चीज़ खोजने निकलता है",
+    "अपने दोस्त की मदद करता है",
+    "एक मजेदार पहेली हल करता है",
+    "सबको एक साथ इकट्ठा करता है",
+    "एक छोटी गलती को ठीक करता है",
+    "एक अनोखी प्रतियोगिता में भाग लेता है",
+    "एक रहस्यमयी रास्ते पर जाता है",
+    "बारिश से पहले एक काम पूरा करता है",
+    "एक नए दोस्त से मिलता है",
+    "एक छोटी मुसीबत का मजेदार हल निकालता है",
+    "एक सरप्राइज पार्टी बचाता है",
+    "एक खोया हुआ खजाना ढूँढता है",
+    "एक अजीब आवाज़ का राज पता करता है",
+    "सबको हँसाने वाला खेल शुरू करता है",
+    "एक जादुई चीज़ को सही जगह पहुँचाता है",
+    "अपने डर पर काबू पाता है",
+    "एक दोस्त के लिए सरप्राइज तैयार करता है",
+    "एक रहस्यमयी दरवाजा खोलता है",
+    "एक मजेदार रेस में शामिल होता है",
+    "एक खोई हुई दोस्ती वापस लाता है",
+    "एक बड़ी समस्या का छोटा सा हल ढूँढता है",
+    "एक अजीब सपने का मतलब पता करता है",
+    "सबके साथ मिलकर एक शानदार काम करता है",
+    "एक अनोखे मेले में पहुँच जाता है",
+    "एक रहस्यमयी आवाज़ का पीछा करता है"
 ]
 
 
@@ -103,7 +232,9 @@ def norm(value):
 
 
 def load_history():
+
     try:
+
         data = json.loads(
             HISTORY.read_text(
                 encoding="utf-8"
@@ -120,6 +251,7 @@ def load_history():
 
 
 def save_history(history):
+
     HISTORY.write_text(
         json.dumps(
             history[-1000:],
@@ -130,6 +262,10 @@ def save_history(history):
     )
 
 
+# ============================================================
+# RANDOM TOPIC
+# ============================================================
+
 def choose_topic():
 
     history = load_history()
@@ -139,43 +275,62 @@ def choose_topic():
         for item in history
     }
 
-    key = (
-        datetime.now(timezone.utc)
-        .strftime("%Y-%m-%d")
-        + ":"
-        + RUN_SLOT
-    )
+    # Generate many random combinations.
+    # This creates millions of possible topics.
+    for _ in range(100):
 
-    start = (
-        int(
-            hashlib.sha256(
-                key.encode()
-            ).hexdigest()[:8],
-            16
+        character = secrets.choice(
+            CHARACTERS
         )
-        % len(TOPICS)
-    )
 
-    for i in range(len(TOPICS)):
+        place = secrets.choice(
+            PLACES
+        )
 
-        topic = TOPICS[
-            (start + i) % len(TOPICS)
-        ]
+        obj = secrets.choice(
+            OBJECTS
+        )
+
+        action = secrets.choice(
+            ACTIONS
+        )
+
+        twist = secrets.choice(
+            TWISTS
+        )
+
+        topic = (
+            f"{character} का रोमांच: "
+            f"{place} में {obj}, "
+            f"जहाँ वह {action}, "
+            f"लेकिन {twist}।"
+        )
 
         if norm(topic) not in used:
 
             history.append(topic)
+
             save_history(history)
 
             return topic
 
-    topic = TOPICS[start]
+    # Extremely unlikely fallback.
+    topic = (
+        f"{secrets.choice(CHARACTERS)} का "
+        f"नया जादुई एडवेंचर "
+        f"{secrets.token_hex(8)}"
+    )
 
     history.append(topic)
+
     save_history(history)
 
     return topic
 
+
+# ============================================================
+# QUOTA CHECK
+# ============================================================
 
 def is_quota_error(exc):
 
@@ -206,6 +361,7 @@ def generate_story(topic):
     )
 
     if not api_key:
+
         raise RuntimeError(
             "GEMINI_API_KEY is missing."
         )
@@ -217,18 +373,28 @@ def generate_story(topic):
     prompt = f"""
 Create one ORIGINAL Hindi kids story for Toon Kids YouTube Shorts.
 
-Topic:
+RANDOM TOPIC INSPIRATION:
 {topic}
 
-Return ONLY valid JSON.
+IMPORTANT:
+Do NOT simply repeat the topic sentence.
+Use it only as inspiration and create a completely fresh,
+fun and original story.
 
-Age:
-4-10 years.
+Every generation must feel different.
 
-Total narration:
+TARGET AUDIENCE:
+Children ages 4-10.
+
+LANGUAGE:
+Simple, natural Hindi.
+Easy words.
+Fun spoken storytelling style.
+
+TOTAL NARRATION:
 115-145 Hindi words.
 
-Exactly 8 scenes.
+EXACTLY 8 SCENES.
 
 Each scene must contain:
 
@@ -236,28 +402,106 @@ Each scene must contain:
 - text: maximum 8 Hindi words for on-screen text
 - image_prompt: detailed visual prompt for the scene
 
-Use the SAME main character appearance in every scene.
+VOICE STYLE:
+Write narration that sounds energetic when spoken aloud.
+Use short sentences.
+Use natural excitement.
+Use playful expressions.
+Avoid long complicated sentences.
+Avoid boring exposition.
 
-Include a strong curiosity hook in scene 1.
+STORY STRUCTURE:
 
-Story should have:
-- fun beginning
-- curiosity
-- simple problem
-- emotional/funny middle
-- satisfying ending
-- clear moral
+Scene 1:
+VERY STRONG curiosity hook.
+Start with something surprising or funny.
 
-No violence.
-No horror.
-No politics.
-No adult themes.
-No dangerous instructions.
-No copyrighted characters.
+Scene 2:
+Introduce the character and situation quickly.
+
+Scene 3:
+Create a simple problem or mystery.
+
+Scene 4:
+Increase curiosity and excitement.
+
+Scene 5:
+Funny or emotional moment.
+
+Scene 6:
+Character tries to solve the problem.
+
+Scene 7:
+Big reveal / satisfying solution.
+
+Scene 8:
+Happy ending + simple memorable moral.
+
+CHARACTER CONSISTENCY:
+
+Use the SAME main character appearance
+through every scene.
 
 Create a detailed but concise character_bible.
 
-Use this exact JSON structure:
+The character_bible must specify:
+
+- species
+- age/look
+- body shape
+- face
+- eye color
+- fur/skin color
+- clothes
+- accessories
+- distinctive features
+
+IMAGE PROMPTS:
+
+Every image_prompt must repeat the important
+character appearance details.
+
+Make images:
+
+- cute
+- colorful
+- cinematic
+- expressive
+- child-friendly
+- high quality
+- 3D animated
+- visually exciting
+
+NO:
+violence
+horror
+politics
+adult themes
+dangerous instructions
+copyrighted characters
+logos
+brand names
+
+TEXT:
+
+On-screen text must be short,
+exciting and easy for children.
+
+Maximum 8 Hindi words per scene.
+
+Use words like:
+"अरे वाह!"
+"ये क्या हुआ?"
+"चलो देखते हैं!"
+"ओह! ये कैसे?"
+"मिल गया!"
+"वाह! कमाल!"
+
+Do not put written text inside image_prompt.
+
+Return ONLY valid JSON.
+
+Use this exact structure:
 
 {{
   "title": "...",
@@ -287,7 +531,7 @@ Use this exact JSON structure:
                 model=TEXT_MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.9,
+                    temperature=1.0,
                     response_mime_type="application/json"
                 )
             )
@@ -302,6 +546,7 @@ Use this exact JSON structure:
             )
 
             if len(scenes) != 8:
+
                 raise ValueError(
                     "Story must contain exactly 8 scenes."
                 )
@@ -314,7 +559,9 @@ Use this exact JSON structure:
             ]
 
             for key in required:
+
                 if not story.get(key):
+
                     raise ValueError(
                         f"Story missing: {key}"
                     )
@@ -325,16 +572,19 @@ Use this exact JSON structure:
             ):
 
                 if not scene.get("narration"):
+
                     raise ValueError(
                         f"Scene {index} missing narration."
                     )
 
                 if not scene.get("text"):
+
                     raise ValueError(
                         f"Scene {index} missing text."
                     )
 
                 if not scene.get("image_prompt"):
+
                     raise ValueError(
                         f"Scene {index} missing image_prompt."
                     )
@@ -355,6 +605,7 @@ Use this exact JSON structure:
                 ) from exc
 
             if attempt == 2:
+
                 raise
 
             time.sleep(
@@ -377,11 +628,13 @@ def generate_image(prompt, filename):
     )
 
     if not account_id:
+
         raise RuntimeError(
             "CLOUDFLARE_ACCOUNT_ID is missing."
         )
 
     if not api_token:
+
         raise RuntimeError(
             "CLOUDFLARE_API_TOKEN is missing."
         )
@@ -393,13 +646,18 @@ def generate_image(prompt, filename):
     )
 
     # --------------------------------------------------------
-    # Keep character bible + scene prompt within API limit
+    # Prompt length protection
     # --------------------------------------------------------
 
-    source_prompt = str(prompt).strip()
+    source_prompt = str(
+        prompt
+    ).strip()
 
     if len(source_prompt) > 1800:
-        source_prompt = source_prompt[:1800]
+
+        source_prompt = (
+            source_prompt[:1800]
+        )
 
     full_prompt = f"""
 Premium children's 3D animated story frame.
@@ -415,6 +673,7 @@ Appealing for children ages 4-10.
 
 CHARACTER CONSISTENCY:
 Keep the main character exactly consistent.
+
 Same species.
 Same face.
 Same eye color.
@@ -449,8 +708,6 @@ No text inside image.
 No UI.
 """
 
-    # Final hard safety limit.
-    # FLUX.1 Schnell supports a prompt up to 2048 chars.
     full_prompt = full_prompt.strip()
 
     if len(full_prompt) > 2000:
@@ -460,12 +717,18 @@ No UI.
             "Reducing to 2000 chars."
         )
 
-        full_prompt = full_prompt[:2000]
+        full_prompt = (
+            full_prompt[:2000]
+        )
 
     print(
         "Cloudflare prompt length:",
         len(full_prompt)
     )
+
+    # IMPORTANT:
+    # Do NOT send seed.
+    # Cloudflare endpoint rejected /seed.
 
     payload = {
         "prompt": full_prompt,
@@ -644,17 +907,19 @@ No UI.
                 )
 
             # ------------------------------------------------
-            # Remove data URI prefix if present
+            # Remove data URI prefix
             # ------------------------------------------------
 
             if image_b64.startswith(
                 "data:image"
             ):
 
-                image_b64 = image_b64.split(
-                    ",",
-                    1
-                )[1]
+                image_b64 = (
+                    image_b64.split(
+                        ",",
+                        1
+                    )[1]
+                )
 
             # ------------------------------------------------
             # Decode image
@@ -662,8 +927,10 @@ No UI.
 
             try:
 
-                image_bytes = base64.b64decode(
-                    image_b64
+                image_bytes = (
+                    base64.b64decode(
+                        image_b64
+                    )
                 )
 
             except Exception as exc:
@@ -754,14 +1021,17 @@ def tts(story):
         + story["moral"]
     )
 
-    output = WORK / "voice.mp3"
+    output = (
+        WORK / "voice.mp3"
+    )
 
     async def make_voice():
 
         communicate = edge_tts.Communicate(
             text,
             "hi-IN-SwaraNeural",
-            rate=TTS_RATE
+            rate=TTS_RATE,
+            pitch=TTS_PITCH
         )
 
         await communicate.save(
@@ -784,6 +1054,11 @@ def tts(story):
     print(
         "Voice created:",
         output
+    )
+
+    print(
+        "Voice settings:",
+        f"rate={TTS_RATE}, pitch={TTS_PITCH}"
     )
 
     return output
@@ -856,8 +1131,8 @@ def build_video(story, voice):
         story["character_bible"]
     )
 
-    # Keep character bible reasonably short.
     if len(bible) > 900:
+
         bible = bible[:900]
 
     # --------------------------------------------------------
@@ -877,7 +1152,9 @@ def build_video(story, voice):
             "CHARACTER BIBLE:\n"
             + bible
             + "\n\nSCENE:\n"
-            + str(scene["image_prompt"])
+            + str(
+                scene["image_prompt"]
+            )
         )
 
         print(
@@ -901,8 +1178,10 @@ def build_video(story, voice):
     # Voice duration
     # --------------------------------------------------------
 
-    total_voice = ffprobe_duration(
-        voice
+    total_voice = (
+        ffprobe_duration(
+            voice
+        )
     )
 
     print(
@@ -949,7 +1228,9 @@ def build_video(story, voice):
             duration
         )
 
-    # Make total visual duration match voice.
+    # Make total visual duration
+    # match voice duration.
+
     visual_total = sum(
         durations
     )
@@ -961,7 +1242,9 @@ def build_video(story, voice):
             - visual_total
         )
 
-        durations[-1] += difference
+        durations[-1] += (
+            difference
+        )
 
     # --------------------------------------------------------
     # Create clips
@@ -995,7 +1278,14 @@ def build_video(story, voice):
             int(duration * 30)
         )
 
-        # Portrait crop + subtle zoom.
+        # ----------------------------------------------------
+        # Clean text overlay
+        #
+        # IMPORTANT:
+        # No black box.
+        # Only white text + shadow.
+        # ----------------------------------------------------
+
         vf = (
             "scale=1080:1920:"
             "force_original_aspect_ratio=increase,"
@@ -1011,13 +1301,13 @@ def build_video(story, voice):
             "fontcolor=white:"
             "fontsize=58:"
             "fontfile="
-            "/usr/share/fonts/truetype/dejavu/"
-            "DejaVuSans.ttf:"
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSansDevanagari-Regular.ttf:"
             "x=(w-text_w)/2:"
             "y=h-text_h-190:"
-            "box=1:"
-            "boxcolor=black@0.48:"
-            "boxborderw=24"
+            "shadowcolor=black@0.90:"
+            "shadowx=3:"
+            "shadowy=3"
         )
 
         print(
@@ -1320,9 +1610,17 @@ def upload_youtube():
 
 def main():
 
-    print("=" * 60)
-    print("TOON KIDS AUTOMATION STARTED")
-    print("=" * 60)
+    print(
+        "=" * 60
+    )
+
+    print(
+        "TOON KIDS AUTOMATION STARTED"
+    )
+
+    print(
+        "=" * 60
+    )
 
     # --------------------------------------------------------
     # Environment check
@@ -1343,13 +1641,13 @@ def main():
             )
 
     # --------------------------------------------------------
-    # Choose topic
+    # Choose random topic
     # --------------------------------------------------------
 
     topic = choose_topic()
 
     print(
-        "Selected topic:",
+        "Selected random topic:",
         topic
     )
 
@@ -1391,11 +1689,11 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Hindi voice
+    # Hindi energetic voice
     # --------------------------------------------------------
 
     print(
-        "Generating Hindi voice..."
+        "Generating energetic Hindi voice..."
     )
 
     voice = tts(
@@ -1437,9 +1735,17 @@ def main():
             "YouTube upload disabled."
         )
 
-    print("=" * 60)
-    print("TOON KIDS AUTOMATION COMPLETED")
-    print("=" * 60)
+    print(
+        "=" * 60
+    )
+
+    print(
+        "TOON KIDS AUTOMATION COMPLETED"
+    )
+
+    print(
+        "=" * 60
+    )
 
 
 # ============================================================
@@ -1447,4 +1753,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
