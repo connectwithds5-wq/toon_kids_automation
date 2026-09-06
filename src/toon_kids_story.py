@@ -5,23 +5,50 @@ import time
 import hashlib
 import asyncio
 import subprocess
+import base64
 from pathlib import Path
 from datetime import datetime, timezone
 
+import requests
 from google import genai
 from google.genai import types
 
+
+# ============================================================
+# PATHS
+# ============================================================
+
 BASE = Path(__file__).resolve().parent.parent
+
 OUT = BASE / "toon_kids_short.mp4"
 META = BASE / "story_metadata.json"
 HISTORY = BASE / "story_history.json"
 WORK = BASE / "work"
+
 WORK.mkdir(exist_ok=True)
 
-TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.6-flash")
-IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+
+# ============================================================
+# MODELS / SETTINGS
+# ============================================================
+
+TEXT_MODEL = os.getenv(
+    "GEMINI_TEXT_MODEL",
+    "gemini-3.6-flash"
+)
+
+CLOUDFLARE_IMAGE_MODEL = (
+    "@cf/black-forest-labs/flux-1-schnell"
+)
+
 RUN_SLOT = os.getenv("RUN_SLOT", "manual")
+
 TTS_RATE = os.getenv("TTS_RATE", "+5%")
+
+
+# ============================================================
+# TOPICS
+# ============================================================
 
 TOPICS = [
     "ईमानदार खरगोश और चमकदार डिब्बा",
@@ -56,77 +83,155 @@ TOPICS = [
     "दादी की पुरानी जादुई घड़ी",
 ]
 
+
+# ============================================================
+# HELPERS
+# ============================================================
+
 def norm(s):
-    return re.sub(r"[^a-z0-9\u0900-\u097f]+", " ", str(s).lower()).strip()
+    return re.sub(
+        r"[^a-z0-9\u0900-\u097f]+",
+        " ",
+        str(s).lower()
+    ).strip()
+
 
 def load_history():
     try:
-        d = json.loads(HISTORY.read_text(encoding="utf-8"))
+        d = json.loads(
+            HISTORY.read_text(encoding="utf-8")
+        )
         return d if isinstance(d, list) else []
     except Exception:
         return []
 
+
 def save_history(h):
-    HISTORY.write_text(json.dumps(h[-1000:], ensure_ascii=False, indent=2), encoding="utf-8")
+    HISTORY.write_text(
+        json.dumps(
+            h[-1000:],
+            ensure_ascii=False,
+            indent=2
+        ),
+        encoding="utf-8"
+    )
+
 
 def choose_topic():
-    h = load_history()
-    used = {norm(x) for x in h}
-    key = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}:{RUN_SLOT}"
-    start = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % len(TOPICS)
+    history = load_history()
+
+    used = {
+        norm(x)
+        for x in history
+    }
+
+    key = (
+        f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        f":{RUN_SLOT}"
+    )
+
+    start = (
+        int(
+            hashlib.sha256(
+                key.encode()
+            ).hexdigest()[:8],
+            16
+        )
+        % len(TOPICS)
+    )
+
     for i in range(len(TOPICS)):
-        t = TOPICS[(start + i) % len(TOPICS)]
-        if norm(t) not in used:
-            h.append(t)
-            save_history(h)
-            return t
-    t = TOPICS[start]
-    h.append(t)
-    save_history(h)
-    return t
+        topic = TOPICS[
+            (start + i) % len(TOPICS)
+        ]
+
+        if norm(topic) not in used:
+            history.append(topic)
+            save_history(history)
+            return topic
+
+    topic = TOPICS[start]
+    history.append(topic)
+    save_history(history)
+
+    return topic
+
 
 def is_quota_error(exc):
-    s = str(exc).upper()
-    return any(x in s for x in [
-        "QUOTA EXCEEDED", "GENERATE_CONTENT_FREE_TIER_REQUESTS",
-        "GENERATEREQUESTSPERDAY", "RESOURCE_EXHAUSTED", "FREE TIER"
-    ])
+    text = str(exc).upper()
+
+    return any(
+        item in text
+        for item in [
+            "QUOTA EXCEEDED",
+            "GENERATE_CONTENT_FREE_TIER_REQUESTS",
+            "GENERATEREQUESTSPERDAY",
+            "RESOURCE_EXHAUSTED",
+            "FREE TIER",
+        ]
+    )
+
+
+# ============================================================
+# GEMINI STORY GENERATION
+# ============================================================
 
 def generate_story(topic):
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"]
+    )
+
     prompt = f"""
 Create one ORIGINAL Hindi kids story for Toon Kids YouTube Shorts.
 
 Topic: {topic}
 
 Return ONLY valid JSON.
+
 Age: 4-10.
-Total narration: 115-145 Hindi words.
+
+Total narration:
+115-145 Hindi words.
+
 Exactly 8 scenes.
-Each scene:
+
+Each scene must contain:
 - narration: 1-2 short spoken Hindi sentences
 - text: maximum 8 Hindi words for on-screen text
 - image_prompt: detailed visual prompt for a cute original 3D cartoon scene
 
 Use the SAME main character appearance in every scene.
-Include a strong curiosity hook in scene 1.
-Happy, wholesome ending and one clear moral.
-No violence, horror, politics, adult themes, dangerous instructions, or copyrighted characters.
 
-Use this exact JSON:
+Include a strong curiosity hook in scene 1.
+
+Happy, wholesome ending and one clear moral.
+
+No violence, horror, politics, adult themes,
+dangerous instructions, or copyrighted characters.
+
+Use this exact JSON structure:
+
 {{
   "title": "...",
   "hook": "...",
   "character_bible": "...",
   "scenes": [
-    {{"narration":"...","text":"...","image_prompt":"..."}}
+    {{
+      "narration": "...",
+      "text": "...",
+      "image_prompt": "..."
+    }}
   ],
-  "moral":"..."
+  "moral": "..."
 }}
 """
+
     for attempt in range(3):
+
         try:
-            r = client.models.generate_content(
+
+            response = client.models.generate_content(
                 model=TEXT_MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -134,222 +239,870 @@ Use this exact JSON:
                     response_mime_type="application/json"
                 )
             )
-            d = json.loads(r.text.strip())
-            if len(d.get("scenes", [])) != 8:
-                raise ValueError("Story did not contain exactly 8 scenes.")
-            return d
-        except Exception as e:
-            if is_quota_error(e):
-                raise RuntimeError("Gemini text quota exhausted. Stopping without quota retries.") from e
-            if attempt == 2:
-                raise
-            time.sleep(10 * (attempt + 1))
 
-def generate_image(client, prompt, filename):
-    full_prompt = f"""
-Create a vertical 9:16 image for a children's animated story.
-Style: premium cute 3D cartoon, colorful, cinematic soft lighting,
-expressive friendly animal characters, polished family-animation look.
-Original characters only. No logos, watermark, captions, subtitles,
-speech bubbles, or written words inside the image.
-
-Keep the character design consistent with this character bible:
-{prompt}
-
-Compose important characters in the center-safe area for a 9:16 YouTube Short.
-"""
-
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model=IMAGE_MODEL,
-                contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE"],
-                    image_config=types.ImageConfig(
-                        aspect_ratio="9:16"
-                    )
-                )
+            story = json.loads(
+                response.text.strip()
             )
 
-            for part in response.parts:
-                if part.inline_data is not None:
-                    part.as_image().save(filename)
-                    return
+            if len(story.get("scenes", [])) != 8:
+                raise ValueError(
+                    "Story did not contain exactly 8 scenes."
+                )
 
-            raise RuntimeError("Image model returned no image.")
+            return story
 
         except Exception as exc:
+
             if is_quota_error(exc):
                 raise RuntimeError(
-                    "Gemini image quota exhausted. Stopping."
+                    "Gemini text quota exhausted."
                 ) from exc
 
             if attempt == 2:
                 raise
 
-            time.sleep(8 * (attempt + 1))
+            time.sleep(
+                10 * (attempt + 1)
+            )
+
+
+# ============================================================
+# CLOUDFLARE FLUX IMAGE GENERATION
+# ============================================================
+
+def generate_image(prompt, filename):
+
+    account_id = os.environ[
+        "CLOUDFLARE_ACCOUNT_ID"
+    ]
+
+    api_token = os.environ[
+        "CLOUDFLARE_API_TOKEN"
+    ]
+
+    url = (
+        "https://api.cloudflare.com/client/v4/"
+        f"accounts/{account_id}/ai/run/"
+        f"{CLOUDFLARE_IMAGE_MODEL}"
+    )
+
+    full_prompt = f"""
+Create a premium children's animated story image.
+
+VISUAL STYLE:
+Cute high-quality 3D cartoon.
+Colorful.
+Warm cinematic lighting.
+Soft rounded shapes.
+Friendly expressive faces.
+Premium family-animation look.
+Very appealing to children ages 4-10.
+
+CHARACTER CONSISTENCY:
+Keep the main character visually consistent.
+Same species.
+Same face.
+Same eye color.
+Same fur/skin color.
+Same clothes.
+Same accessories.
+Same body proportions.
+Same overall character design.
+
+CHARACTER BIBLE:
+{prompt}
+
+COMPOSITION:
+Portrait-oriented children's animation composition.
+Main character large and clearly visible.
+Important action in the center.
+Clean uncluttered background.
+Leave some safe space near top and bottom for
+YouTube Shorts captions.
+
+IMAGE RULES:
+Original characters only.
+No copyrighted characters.
+No logos.
+No watermark.
+No written words.
+No captions.
+No subtitles.
+No speech bubbles.
+No text inside the image.
+No UI elements.
+"""
+
+
+    payload = {
+        "prompt": full_prompt,
+        "steps": 4,
+        "seed": int.from_bytes(
+            os.urandom(4),
+            "big"
+        )
+    }
+
+
+    for attempt in range(4):
+
+        try:
+
+            print(
+                f"Cloudflare image attempt "
+                f"{attempt + 1}/4..."
+            )
+
+            response = requests.post(
+                url,
+                headers={
+                    "Authorization":
+                        f"Bearer {api_token}",
+                    "Content-Type":
+                        "application/json"
+                },
+                json=payload,
+                timeout=180
+            )
+
+
+            # Rate limit
+            if response.status_code == 429:
+
+                if attempt == 3:
+                    response.raise_for_status()
+
+                print(
+                    "Cloudflare rate limit. "
+                    "Waiting before retry..."
+                )
+
+                time.sleep(
+                    15 * (attempt + 1)
+                )
+
+                continue
+
+
+            # Temporary server error
+            if response.status_code >= 500:
+
+                if attempt == 3:
+                    response.raise_for_status()
+
+                print(
+                    "Cloudflare temporary server error."
+                )
+
+                time.sleep(
+                    10 * (attempt + 1)
+                )
+
+                continue
+
+
+            response.raise_for_status()
+
+
+            data = response.json()
+
+
+            if not data.get("success"):
+
+                raise RuntimeError(
+                    "Cloudflare image generation failed: "
+                    + str(
+                        data.get("errors")
+                    )
+                )
+
+
+            result = data.get(
+                "result",
+                {}
+            )
+
+
+            image_b64 = result.get(
+                "image"
+            )
+
+
+            if not image_b64:
+
+                raise RuntimeError(
+                    "Cloudflare returned no image data."
+                )
+
+
+            # Decode Base64 image
+            image_bytes = base64.b64decode(
+                image_b64
+            )
+
+
+            Path(filename).write_bytes(
+                image_bytes
+            )
+
+
+            # Verify file
+            if (
+                not Path(filename).exists()
+                or Path(filename).stat().st_size == 0
+            ):
+                raise RuntimeError(
+                    "Generated image file is empty."
+                )
+
+
+            print(
+                f"Image saved: {filename}"
+            )
+
+            return
+
+
+        except requests.RequestException as exc:
+
+            if attempt == 3:
+                raise RuntimeError(
+                    f"Cloudflare request failed: {exc}"
+                ) from exc
+
+            print(
+                "Cloudflare request error. Retrying..."
+            )
+
+            time.sleep(
+                10 * (attempt + 1)
+            )
+
+
+# ============================================================
+# TEXT TO SPEECH
+# ============================================================
+
 def tts(story):
+
     import edge_tts
-    text = " ".join(s["narration"] for s in story["scenes"]) + " " + story["moral"]
-    out = WORK / "voice.mp3"
+
+    text = (
+        " ".join(
+            scene["narration"]
+            for scene in story["scenes"]
+        )
+        + " "
+        + story["moral"]
+    )
+
+    output = WORK / "voice.mp3"
+
 
     async def make():
+
         await edge_tts.Communicate(
             text,
             "hi-IN-SwaraNeural",
             rate=TTS_RATE
-        ).save(str(out))
+        ).save(
+            str(output)
+        )
+
 
     asyncio.run(make())
-    return out
+
+    return output
+
+
+# ============================================================
+# FFPROBE
+# ============================================================
 
 def ffprobe_duration(path):
-    r = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        capture_output=True, text=True, check=True
+
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True
     )
-    return float(r.stdout.strip())
+
+    return float(
+        result.stdout.strip()
+    )
+
+
+# ============================================================
+# FFMPEG TEXT ESCAPE
+# ============================================================
 
 def esc(text):
-    return (str(text).replace("\\", "\\\\").replace(":", "\\:")
-            .replace("'", "\\'").replace("%", "\\%").replace("\n", " "))
+
+    return (
+        str(text)
+        .replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+        .replace("%", "\\%")
+        .replace("\n", " ")
+    )
+
+
+# ============================================================
+# RUN COMMAND
+# ============================================================
 
 def run(cmd):
-    subprocess.run(cmd, check=True)
+
+    subprocess.run(
+        cmd,
+        check=True
+    )
+
+
+# ============================================================
+# BUILD VIDEO
+# ============================================================
 
 def build_video(story, voice):
-    images = []
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    bible = story["character_bible"]
 
-    for i, scene in enumerate(story["scenes"], 1):
-        img = WORK / f"scene_{i}.png"
-        image_prompt = f"{bible}\n\nScene {i}: {scene['image_prompt']}"
-        print(f"Generating image {i}/8...")
-        generate_image(client, image_prompt, img)
+    images = []
+
+    bible = story[
+        "character_bible"
+    ]
+
+
+    # --------------------------------------------------------
+    # Generate 8 images
+    # --------------------------------------------------------
+
+    for i, scene in enumerate(
+        story["scenes"],
+        1
+    ):
+
+        img = WORK / f"scene_{i}.jpg"
+
+        image_prompt = (
+            f"{bible}\n\n"
+            f"Scene {i}: "
+            f"{scene['image_prompt']}"
+        )
+
+        print(
+            f"Generating image {i}/8..."
+        )
+
+        generate_image(
+            image_prompt,
+            img
+        )
+
         images.append(img)
 
-    total_voice = ffprobe_duration(voice)
+
+    # --------------------------------------------------------
+    # Voice duration
+    # --------------------------------------------------------
+
+    total_voice = ffprobe_duration(
+        voice
+    )
+
+
     weights = []
+
     for scene in story["scenes"]:
-        words = max(1, len(scene["narration"].split()))
+
+        words = max(
+            1,
+            len(
+                scene["narration"].split()
+            )
+        )
+
         weights.append(words)
+
+
     total_weight = sum(weights)
 
+
+    # --------------------------------------------------------
+    # Create clips
+    # --------------------------------------------------------
+
     clips = []
-    for i, (img, scene, weight) in enumerate(zip(images, story["scenes"], weights), 1):
-        duration = max(3.5, total_voice * weight / total_weight)
-        clip = WORK / f"clip_{i}.mp4"
-        text = esc(scene["text"])
-        vf = (
-            f"scale=1080:1920:force_original_aspect_ratio=increase,"
-            f"crop=1080:1920,"
-            f"zoompan=z='min(zoom+0.0008,1.08)':"
-            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"d={int(duration*30)}:s=1080x1920:fps=30,"
-            f"drawtext=text='{text}':fontcolor=white:fontsize=58:"
-            f"fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:"
-            f"x=(w-text_w)/2:y=h-text_h-190:"
-            f"box=1:boxcolor=black@0.48:boxborderw=24"
+
+
+    for i, (
+        img,
+        scene,
+        weight
+    ) in enumerate(
+        zip(
+            images,
+            story["scenes"],
+            weights
+        ),
+        1
+    ):
+
+        duration = max(
+            3.5,
+            total_voice
+            * weight
+            / total_weight
         )
-        run([
-            "ffmpeg", "-y", "-loop", "1", "-i", str(img),
-            "-t", str(duration), "-vf", vf,
-            "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(clip)
-        ])
+
+
+        clip = (
+            WORK
+            / f"clip_{i}.mp4"
+        )
+
+
+        text = esc(
+            scene["text"]
+        )
+
+
+        vf = (
+            "scale=1080:1920:"
+            "force_original_aspect_ratio=increase,"
+            "crop=1080:1920,"
+            "zoompan="
+            "z='min(zoom+0.0008,1.08)':"
+            "x='iw/2-(iw/zoom/2)':"
+            "y='ih/2-(ih/zoom/2)':"
+            f"d={int(duration * 30)}:"
+            "s=1080x1920:"
+            "fps=30,"
+            f"drawtext=text='{text}':"
+            "fontcolor=white:"
+            "fontsize=58:"
+            "fontfile="
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans.ttf:"
+            "x=(w-text_w)/2:"
+            "y=h-text_h-190:"
+            "box=1:"
+            "boxcolor=black@0.48:"
+            "boxborderw=24"
+        )
+
+
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-loop",
+                "1",
+                "-i",
+                str(img),
+                "-t",
+                str(duration),
+                "-vf",
+                vf,
+                "-an",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(clip),
+            ]
+        )
+
+
         clips.append(clip)
 
-    concat = WORK / "concat.txt"
-    concat.write_text("\n".join(f"file '{x.as_posix()}'" for x in clips), encoding="utf-8")
-    silent = WORK / "silent.mp4"
-    run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
-         "-c", "copy", str(silent)])
 
-    music = WORK / "music.wav"
-    run(["ffmpeg", "-y", "-f", "lavfi", "-i",
-         "sine=frequency=330:sample_rate=44100", "-t", "90",
-         "-filter:a", "volume=0.025", str(music)])
+    # --------------------------------------------------------
+    # Concatenate clips
+    # --------------------------------------------------------
 
-    mixed = WORK / "mixed.m4a"
-    run(["ffmpeg", "-y", "-i", str(voice), "-i", str(music),
-         "-filter_complex",
-         "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[v];"
-         "[1:a]volume=0.30[m];"
-         "[v][m]amix=inputs=2:duration=first,loudnorm=I=-14:TP=-1:LRA=10",
-         "-c:a", "aac", "-b:a", "128k", str(mixed)])
+    concat = (
+        WORK / "concat.txt"
+    )
 
-    run(["ffmpeg", "-y", "-i", str(silent), "-i", str(mixed),
-         "-map", "0:v:0", "-map", "1:a:0",
-         "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
-         "-shortest", str(OUT)])
+    concat.write_text(
+        "\n".join(
+            f"file '{x.as_posix()}'"
+            for x in clips
+        ),
+        encoding="utf-8"
+    )
+
+
+    silent = (
+        WORK / "silent.mp4"
+    )
+
+
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat),
+            "-c",
+            "copy",
+            str(silent),
+        ]
+    )
+
+
+    # --------------------------------------------------------
+    # Background music
+    # --------------------------------------------------------
+
+    music = (
+        WORK / "music.wav"
+    )
+
+
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=330:"
+            "sample_rate=44100",
+            "-t",
+            "90",
+            "-filter:a",
+            "volume=0.025",
+            str(music),
+        ]
+    )
+
+
+    # --------------------------------------------------------
+    # Mix voice + music
+    # --------------------------------------------------------
+
+    mixed = (
+        WORK / "mixed.m4a"
+    )
+
+
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(voice),
+            "-i",
+            str(music),
+            "-filter_complex",
+            "[0:a]"
+            "loudnorm="
+            "I=-16:"
+            "TP=-1.5:"
+            "LRA=11[v];"
+            "[1:a]"
+            "volume=0.30[m];"
+            "[v][m]"
+            "amix="
+            "inputs=2:"
+            "duration=first,"
+            "loudnorm="
+            "I=-14:"
+            "TP=-1:"
+            "LRA=10",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            str(mixed),
+        ]
+    )
+
+
+    # --------------------------------------------------------
+    # Final video
+    # --------------------------------------------------------
+
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(silent),
+            "-i",
+            str(mixed),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-shortest",
+            str(OUT),
+        ]
+    )
+
+
+# ============================================================
+# YOUTUBE UPLOAD
+# ============================================================
 
 def upload_youtube():
+
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
     from google.oauth2.credentials import Credentials
 
+
     creds = Credentials(
         None,
-        refresh_token=os.environ["YOUTUBE_REFRESH_TOKEN"],
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=os.environ["YOUTUBE_CLIENT_ID"],
-        client_secret=os.environ["YOUTUBE_CLIENT_SECRET"],
-        scopes=["https://www.googleapis.com/auth/youtube.upload"]
+        refresh_token=os.environ[
+            "YOUTUBE_REFRESH_TOKEN"
+        ],
+        token_uri=(
+            "https://oauth2.googleapis.com/token"
+        ),
+        client_id=os.environ[
+            "YOUTUBE_CLIENT_ID"
+        ],
+        client_secret=os.environ[
+            "YOUTUBE_CLIENT_SECRET"
+        ],
+        scopes=[
+            "https://www.googleapis.com/auth/"
+            "youtube.upload"
+        ]
     )
-    youtube = build("youtube", "v3", credentials=creds)
-    data = json.loads(META.read_text(encoding="utf-8"))
+
+
+    youtube = build(
+        "youtube",
+        "v3",
+        credentials=creds
+    )
+
+
+    data = json.loads(
+        META.read_text(
+            encoding="utf-8"
+        )
+    )
+
 
     body = {
         "snippet": {
-            "title": data["title"][:95] + " #Shorts",
-            "description": (
-                data["hook"] +
-                "\n\n🌈 Toon Kids पर रोज़ नई हिंदी कहानी!"
-                "\n❤️ इस कहानी से आपको क्या सीख मिली?"
-                "\n\n#shorts #toonkids #hindistory #kidsstory #moralstory #hindikahani"
+            "title": (
+                data["title"][:95]
+                + " #Shorts"
             ),
+
+            "description": (
+                data["hook"]
+                + "\n\n"
+                "🌈 Toon Kids पर रोज़ नई हिंदी कहानी!"
+                "\n❤️ इस कहानी से आपको क्या सीख मिली?"
+                "\n\n"
+                "#shorts #toonkids #hindistory "
+                "#kidsstory #moralstory #hindikahani"
+            ),
+
             "tags": [
-                "toon kids", "hindi kids story", "kids story",
-                "hindi kahani", "moral story", "bachon ki kahani",
-                "kids shorts", "bedtime story"
+                "toon kids",
+                "hindi kids story",
+                "kids story",
+                "hindi kahani",
+                "moral story",
+                "bachon ki kahani",
+                "kids shorts",
+                "bedtime story"
             ],
+
             "categoryId": "27"
         },
+
         "status": {
             "privacyStatus": "public",
             "selfDeclaredMadeForKids": True
         }
     }
 
-    req = youtube.videos().insert(
+
+    request = youtube.videos().insert(
         part="snippet,status",
         body=body,
-        media_body=MediaFileUpload(str(OUT), mimetype="video/mp4", resumable=True)
+        media_body=MediaFileUpload(
+            str(OUT),
+            mimetype="video/mp4",
+            resumable=True
+        )
     )
-    result = req.execute()
-    print("YouTube upload complete:", result.get("id"))
+
+
+    response = request.execute()
+
+
+    print(
+        "YouTube upload successful!"
+    )
+
+    print(
+        "Video ID:",
+        response.get("id")
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
-    print("=== TOON KIDS AI STORY ===")
+
+    print("=" * 60)
+    print("TOON KIDS AUTOMATION STARTED")
+    print("=" * 60)
+
+
+    # --------------------------------------------------------
+    # Choose topic
+    # --------------------------------------------------------
+
     topic = choose_topic()
-    print("Topic:", topic)
 
-    story = generate_story(topic)
-    META.write_text(json.dumps({
-        "topic": topic,
-        **story,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(
+        "Selected topic:",
+        topic
+    )
 
-    voice = tts(story)
-    build_video(story, voice)
 
-    if os.getenv("UPLOAD_YOUTUBE", "true").lower() == "true":
+    # --------------------------------------------------------
+    # Generate story
+    # --------------------------------------------------------
+
+    print(
+        "Generating Hindi story..."
+    )
+
+    story = generate_story(
+        topic
+    )
+
+
+    print(
+        "Story generated:",
+        story["title"]
+    )
+
+
+    # --------------------------------------------------------
+    # Save metadata
+    # --------------------------------------------------------
+
+    META.write_text(
+        json.dumps(
+            {
+                "title": story["title"],
+                "hook": story["hook"],
+                "moral": story["moral"],
+                "topic": topic
+            },
+            ensure_ascii=False,
+            indent=2
+        ),
+        encoding="utf-8"
+    )
+
+
+    # --------------------------------------------------------
+    # Generate Hindi voice
+    # --------------------------------------------------------
+
+    print(
+        "Generating Hindi voice..."
+    )
+
+    voice = tts(
+        story
+    )
+
+
+    # --------------------------------------------------------
+    # Build video
+    # --------------------------------------------------------
+
+    print(
+        "Building video..."
+    )
+
+    build_video(
+        story,
+        voice
+    )
+
+
+    if not OUT.exists():
+        raise RuntimeError(
+            "Final video was not created."
+        )
+
+
+    print(
+        "Video created:",
+        OUT
+    )
+
+
+    # --------------------------------------------------------
+    # Upload
+    # --------------------------------------------------------
+
+    upload_enabled = (
+        os.getenv(
+            "UPLOAD_YOUTUBE",
+            "true"
+        ).lower()
+        == "true"
+    )
+
+
+    if upload_enabled:
+
+        print(
+            "Uploading to YouTube..."
+        )
+
         upload_youtube()
 
-    print("DONE:", OUT)
+    else:
+
+        print(
+            "YouTube upload disabled."
+        )
+
+
+    print("=" * 60)
+    print("TOON KIDS AUTOMATION COMPLETED")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
     main()
