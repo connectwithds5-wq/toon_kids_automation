@@ -49,12 +49,12 @@ RUN_SLOT = os.getenv(
 # Energetic Hindi voice
 TTS_RATE = os.getenv(
     "TTS_RATE",
-    "+15%"
+    "+25%"
 )
 
 TTS_PITCH = os.getenv(
     "TTS_PITCH",
-    "+2Hz"
+    "+3Hz"
 )
 
 
