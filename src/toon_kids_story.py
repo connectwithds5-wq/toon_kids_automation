@@ -469,11 +469,7 @@ No UI.
 
     payload = {
         "prompt": full_prompt,
-        "steps": 4,
-        "seed": int.from_bytes(
-            os.urandom(4),
-            "big"
-        )
+        "steps": 4
     }
 
     for attempt in range(4):
