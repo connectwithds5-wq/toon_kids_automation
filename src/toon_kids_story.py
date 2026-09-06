@@ -29,7 +29,7 @@ WORK.mkdir(exist_ok=True)
 
 
 # ============================================================
-# MODELS / SETTINGS
+# SETTINGS
 # ============================================================
 
 TEXT_MODEL = os.getenv(
@@ -41,9 +41,15 @@ CLOUDFLARE_IMAGE_MODEL = (
     "@cf/black-forest-labs/flux-1-schnell"
 )
 
-RUN_SLOT = os.getenv("RUN_SLOT", "manual")
+RUN_SLOT = os.getenv(
+    "RUN_SLOT",
+    "manual"
+)
 
-TTS_RATE = os.getenv("TTS_RATE", "+5%")
+TTS_RATE = os.getenv(
+    "TTS_RATE",
+    "+5%"
+)
 
 
 # ============================================================
@@ -88,28 +94,35 @@ TOPICS = [
 # HELPERS
 # ============================================================
 
-def norm(s):
+def norm(value):
     return re.sub(
         r"[^a-z0-9\u0900-\u097f]+",
         " ",
-        str(s).lower()
+        str(value).lower()
     ).strip()
 
 
 def load_history():
     try:
-        d = json.loads(
-            HISTORY.read_text(encoding="utf-8")
+        data = json.loads(
+            HISTORY.read_text(
+                encoding="utf-8"
+            )
         )
-        return d if isinstance(d, list) else []
+
+        if isinstance(data, list):
+            return data
+
     except Exception:
-        return []
+        pass
+
+    return []
 
 
-def save_history(h):
+def save_history(history):
     HISTORY.write_text(
         json.dumps(
-            h[-1000:],
+            history[-1000:],
             ensure_ascii=False,
             indent=2
         ),
@@ -118,16 +131,19 @@ def save_history(h):
 
 
 def choose_topic():
+
     history = load_history()
 
     used = {
-        norm(x)
-        for x in history
+        norm(item)
+        for item in history
     }
 
     key = (
-        f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
-        f":{RUN_SLOT}"
+        datetime.now(timezone.utc)
+        .strftime("%Y-%m-%d")
+        + ":"
+        + RUN_SLOT
     )
 
     start = (
@@ -141,16 +157,20 @@ def choose_topic():
     )
 
     for i in range(len(TOPICS)):
+
         topic = TOPICS[
             (start + i) % len(TOPICS)
         ]
 
         if norm(topic) not in used:
+
             history.append(topic)
             save_history(history)
+
             return topic
 
     topic = TOPICS[start]
+
     history.append(topic)
     save_history(history)
 
@@ -158,17 +178,20 @@ def choose_topic():
 
 
 def is_quota_error(exc):
+
     text = str(exc).upper()
 
+    keywords = [
+        "QUOTA EXCEEDED",
+        "GENERATE_CONTENT_FREE_TIER_REQUESTS",
+        "GENERATEREQUESTSPERDAY",
+        "RESOURCE_EXHAUSTED",
+        "FREE TIER"
+    ]
+
     return any(
-        item in text
-        for item in [
-            "QUOTA EXCEEDED",
-            "GENERATE_CONTENT_FREE_TIER_REQUESTS",
-            "GENERATEREQUESTSPERDAY",
-            "RESOURCE_EXHAUSTED",
-            "FREE TIER",
-        ]
+        keyword in text
+        for keyword in keywords
     )
 
 
@@ -178,18 +201,29 @@ def is_quota_error(exc):
 
 def generate_story(topic):
 
+    api_key = os.environ.get(
+        "GEMINI_API_KEY"
+    )
+
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY is missing."
+        )
+
     client = genai.Client(
-        api_key=os.environ["GEMINI_API_KEY"]
+        api_key=api_key
     )
 
     prompt = f"""
 Create one ORIGINAL Hindi kids story for Toon Kids YouTube Shorts.
 
-Topic: {topic}
+Topic:
+{topic}
 
 Return ONLY valid JSON.
 
-Age: 4-10.
+Age:
+4-10 years.
 
 Total narration:
 115-145 Hindi words.
@@ -197,18 +231,31 @@ Total narration:
 Exactly 8 scenes.
 
 Each scene must contain:
+
 - narration: 1-2 short spoken Hindi sentences
 - text: maximum 8 Hindi words for on-screen text
-- image_prompt: detailed visual prompt for a cute original 3D cartoon scene
+- image_prompt: detailed visual prompt for the scene
 
 Use the SAME main character appearance in every scene.
 
 Include a strong curiosity hook in scene 1.
 
-Happy, wholesome ending and one clear moral.
+Story should have:
+- fun beginning
+- curiosity
+- simple problem
+- emotional/funny middle
+- satisfying ending
+- clear moral
 
-No violence, horror, politics, adult themes,
-dangerous instructions, or copyrighted characters.
+No violence.
+No horror.
+No politics.
+No adult themes.
+No dangerous instructions.
+No copyrighted characters.
+
+Create a detailed but concise character_bible.
 
 Use this exact JSON structure:
 
@@ -231,6 +278,11 @@ Use this exact JSON structure:
 
         try:
 
+            print(
+                f"Gemini story attempt "
+                f"{attempt + 1}/3..."
+            )
+
             response = client.models.generate_content(
                 model=TEXT_MODEL,
                 contents=prompt,
@@ -244,16 +296,60 @@ Use this exact JSON structure:
                 response.text.strip()
             )
 
-            if len(story.get("scenes", [])) != 8:
+            scenes = story.get(
+                "scenes",
+                []
+            )
+
+            if len(scenes) != 8:
                 raise ValueError(
-                    "Story did not contain exactly 8 scenes."
+                    "Story must contain exactly 8 scenes."
                 )
+
+            required = [
+                "title",
+                "hook",
+                "character_bible",
+                "moral"
+            ]
+
+            for key in required:
+                if not story.get(key):
+                    raise ValueError(
+                        f"Story missing: {key}"
+                    )
+
+            for index, scene in enumerate(
+                scenes,
+                1
+            ):
+
+                if not scene.get("narration"):
+                    raise ValueError(
+                        f"Scene {index} missing narration."
+                    )
+
+                if not scene.get("text"):
+                    raise ValueError(
+                        f"Scene {index} missing text."
+                    )
+
+                if not scene.get("image_prompt"):
+                    raise ValueError(
+                        f"Scene {index} missing image_prompt."
+                    )
 
             return story
 
         except Exception as exc:
 
+            print(
+                "Gemini story error:",
+                str(exc)
+            )
+
             if is_quota_error(exc):
+
                 raise RuntimeError(
                     "Gemini text quota exhausted."
                 ) from exc
@@ -267,18 +363,28 @@ Use this exact JSON structure:
 
 
 # ============================================================
-# CLOUDFLARE FLUX IMAGE GENERATION
+# CLOUDFLARE IMAGE GENERATION
 # ============================================================
 
 def generate_image(prompt, filename):
 
-    account_id = os.environ[
+    account_id = os.environ.get(
         "CLOUDFLARE_ACCOUNT_ID"
-    ]
+    )
 
-    api_token = os.environ[
+    api_token = os.environ.get(
         "CLOUDFLARE_API_TOKEN"
-    ]
+    )
+
+    if not account_id:
+        raise RuntimeError(
+            "CLOUDFLARE_ACCOUNT_ID is missing."
+        )
+
+    if not api_token:
+        raise RuntimeError(
+            "CLOUDFLARE_API_TOKEN is missing."
+        )
 
     url = (
         "https://api.cloudflare.com/client/v4/"
@@ -286,39 +392,49 @@ def generate_image(prompt, filename):
         f"{CLOUDFLARE_IMAGE_MODEL}"
     )
 
-    full_prompt = f"""
-Create a premium children's animated story image.
+    # --------------------------------------------------------
+    # Keep character bible + scene prompt within API limit
+    # --------------------------------------------------------
 
-VISUAL STYLE:
+    source_prompt = str(prompt).strip()
+
+    if len(source_prompt) > 1800:
+        source_prompt = source_prompt[:1800]
+
+    full_prompt = f"""
+Premium children's 3D animated story frame.
+
+STYLE:
 Cute high-quality 3D cartoon.
-Colorful.
+Colorful family animation.
 Warm cinematic lighting.
 Soft rounded shapes.
 Friendly expressive faces.
-Premium family-animation look.
-Very appealing to children ages 4-10.
+Bright cheerful environment.
+Appealing for children ages 4-10.
 
 CHARACTER CONSISTENCY:
-Keep the main character visually consistent.
+Keep the main character exactly consistent.
 Same species.
 Same face.
 Same eye color.
-Same fur/skin color.
+Same fur or skin color.
 Same clothes.
 Same accessories.
 Same body proportions.
-Same overall character design.
+Same overall design.
 
-CHARACTER BIBLE:
-{prompt}
+CHARACTER AND SCENE:
+{source_prompt}
 
 COMPOSITION:
-Portrait-oriented children's animation composition.
+Vertical portrait composition.
 Main character large and clearly visible.
-Important action in the center.
-Clean uncluttered background.
-Leave some safe space near top and bottom for
-YouTube Shorts captions.
+Main action in center.
+Simple clean background.
+Strong facial expression.
+Clear storytelling.
+Leave safe space at top and bottom.
 
 IMAGE RULES:
 Original characters only.
@@ -329,10 +445,27 @@ No written words.
 No captions.
 No subtitles.
 No speech bubbles.
-No text inside the image.
-No UI elements.
+No text inside image.
+No UI.
 """
 
+    # Final hard safety limit.
+    # FLUX.1 Schnell supports a prompt up to 2048 chars.
+    full_prompt = full_prompt.strip()
+
+    if len(full_prompt) > 2000:
+
+        print(
+            f"Prompt length {len(full_prompt)} chars. "
+            "Reducing to 2000 chars."
+        )
+
+        full_prompt = full_prompt[:2000]
+
+    print(
+        "Cloudflare prompt length:",
+        len(full_prompt)
+    )
 
     payload = {
         "prompt": full_prompt,
@@ -342,7 +475,6 @@ No UI elements.
             "big"
         )
     }
-
 
     for attempt in range(4):
 
@@ -365,34 +497,63 @@ No UI elements.
                 timeout=180
             )
 
-
+            # ------------------------------------------------
             # Rate limit
+            # ------------------------------------------------
+
             if response.status_code == 429:
 
+                print(
+                    "Cloudflare rate limit."
+                )
+
                 if attempt == 3:
-                    response.raise_for_status()
+
+                    print(
+                        "Cloudflare response:",
+                        response.text[:2000]
+                    )
+
+                    raise RuntimeError(
+                        "Cloudflare rate limit after "
+                        "all retries."
+                    )
+
+                wait_seconds = (
+                    15 * (attempt + 1)
+                )
 
                 print(
-                    "Cloudflare rate limit. "
-                    "Waiting before retry..."
+                    f"Waiting {wait_seconds}s..."
                 )
 
                 time.sleep(
-                    15 * (attempt + 1)
+                    wait_seconds
                 )
 
                 continue
 
+            # ------------------------------------------------
+            # Server errors
+            # ------------------------------------------------
 
-            # Temporary server error
             if response.status_code >= 500:
 
-                if attempt == 3:
-                    response.raise_for_status()
+                print(
+                    "Cloudflare temporary server error:",
+                    response.status_code
+                )
 
                 print(
-                    "Cloudflare temporary server error."
+                    response.text[:1000]
                 )
+
+                if attempt == 3:
+
+                    raise RuntimeError(
+                        "Cloudflare server error after "
+                        "all retries."
+                    )
 
                 time.sleep(
                     10 * (attempt + 1)
@@ -400,79 +561,178 @@ No UI elements.
 
                 continue
 
+            # ------------------------------------------------
+            # Client errors
+            # ------------------------------------------------
 
-            response.raise_for_status()
+            if response.status_code >= 400:
 
+                print(
+                    "Cloudflare HTTP error:",
+                    response.status_code
+                )
 
-            data = response.json()
+                print(
+                    "Cloudflare API response:"
+                )
 
+                print(
+                    response.text[:3000]
+                )
+
+                raise RuntimeError(
+                    "Cloudflare image request failed: "
+                    f"HTTP {response.status_code}"
+                )
+
+            # ------------------------------------------------
+            # Parse response
+            # ------------------------------------------------
+
+            try:
+
+                data = response.json()
+
+            except Exception as exc:
+
+                print(
+                    "Cloudflare returned invalid JSON:"
+                )
+
+                print(
+                    response.text[:3000]
+                )
+
+                raise RuntimeError(
+                    "Invalid Cloudflare API response."
+                ) from exc
 
             if not data.get("success"):
 
-                raise RuntimeError(
-                    "Cloudflare image generation failed: "
-                    + str(
-                        data.get("errors")
-                    )
+                errors = data.get(
+                    "errors",
+                    []
                 )
 
+                print(
+                    "Cloudflare API errors:",
+                    errors
+                )
+
+                raise RuntimeError(
+                    "Cloudflare image generation failed: "
+                    + str(errors)
+                )
 
             result = data.get(
                 "result",
                 {}
             )
 
-
             image_b64 = result.get(
                 "image"
             )
 
-
             if not image_b64:
+
+                print(
+                    "Cloudflare result:"
+                )
+
+                print(
+                    str(result)[:3000]
+                )
 
                 raise RuntimeError(
                     "Cloudflare returned no image data."
                 )
 
+            # ------------------------------------------------
+            # Remove data URI prefix if present
+            # ------------------------------------------------
 
-            # Decode Base64 image
-            image_bytes = base64.b64decode(
-                image_b64
+            if image_b64.startswith(
+                "data:image"
+            ):
+
+                image_b64 = image_b64.split(
+                    ",",
+                    1
+                )[1]
+
+            # ------------------------------------------------
+            # Decode image
+            # ------------------------------------------------
+
+            try:
+
+                image_bytes = base64.b64decode(
+                    image_b64
+                )
+
+            except Exception as exc:
+
+                raise RuntimeError(
+                    "Could not decode Cloudflare image."
+                ) from exc
+
+            output_path = Path(
+                filename
             )
 
-
-            Path(filename).write_bytes(
+            output_path.write_bytes(
                 image_bytes
             )
 
-
-            # Verify file
             if (
-                not Path(filename).exists()
-                or Path(filename).stat().st_size == 0
+                not output_path.exists()
+                or output_path.stat().st_size == 0
             ):
+
                 raise RuntimeError(
                     "Generated image file is empty."
                 )
 
-
             print(
-                f"Image saved: {filename}"
+                f"Image saved successfully: "
+                f"{output_path}"
             )
 
-            return
+            print(
+                f"Image size: "
+                f"{output_path.stat().st_size} bytes"
+            )
 
+            return output_path
 
-        except requests.RequestException as exc:
+        except requests.Timeout as exc:
+
+            print(
+                "Cloudflare request timed out."
+            )
 
             if attempt == 3:
+
                 raise RuntimeError(
-                    f"Cloudflare request failed: {exc}"
+                    "Cloudflare request timed out "
+                    "after all retries."
                 ) from exc
 
-            print(
-                "Cloudflare request error. Retrying..."
+            time.sleep(
+                10 * (attempt + 1)
             )
+
+        except requests.ConnectionError as exc:
+
+            print(
+                "Cloudflare connection error."
+            )
+
+            if attempt == 3:
+
+                raise RuntimeError(
+                    "Cloudflare connection failed."
+                ) from exc
 
             time.sleep(
                 10 * (attempt + 1)
@@ -487,36 +747,54 @@ def tts(story):
 
     import edge_tts
 
+    narration = " ".join(
+        scene["narration"]
+        for scene in story["scenes"]
+    )
+
     text = (
-        " ".join(
-            scene["narration"]
-            for scene in story["scenes"]
-        )
+        narration
         + " "
         + story["moral"]
     )
 
     output = WORK / "voice.mp3"
 
+    async def make_voice():
 
-    async def make():
-
-        await edge_tts.Communicate(
+        communicate = edge_tts.Communicate(
             text,
             "hi-IN-SwaraNeural",
             rate=TTS_RATE
-        ).save(
+        )
+
+        await communicate.save(
             str(output)
         )
 
+    asyncio.run(
+        make_voice()
+    )
 
-    asyncio.run(make())
+    if (
+        not output.exists()
+        or output.stat().st_size == 0
+    ):
+
+        raise RuntimeError(
+            "Hindi voice file was not created."
+        )
+
+    print(
+        "Voice created:",
+        output
+    )
 
     return output
 
 
 # ============================================================
-# FFPROBE
+# FFMPEG / FFPROBE
 # ============================================================
 
 def ffprobe_duration(path):
@@ -530,7 +808,7 @@ def ffprobe_duration(path):
             "format=duration",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
-            str(path),
+            str(path)
         ],
         capture_output=True,
         text=True,
@@ -542,9 +820,21 @@ def ffprobe_duration(path):
     )
 
 
-# ============================================================
-# FFMPEG TEXT ESCAPE
-# ============================================================
+def run_command(command):
+
+    print(
+        "Running:",
+        " ".join(
+            str(x)
+            for x in command
+        )
+    )
+
+    subprocess.run(
+        command,
+        check=True
+    )
+
 
 def esc(text):
 
@@ -559,18 +849,6 @@ def esc(text):
 
 
 # ============================================================
-# RUN COMMAND
-# ============================================================
-
-def run(cmd):
-
-    subprocess.run(
-        cmd,
-        check=True
-    )
-
-
-# ============================================================
 # BUILD VIDEO
 # ============================================================
 
@@ -578,39 +856,50 @@ def build_video(story, voice):
 
     images = []
 
-    bible = story[
-        "character_bible"
-    ]
+    bible = str(
+        story["character_bible"]
+    )
 
+    # Keep character bible reasonably short.
+    if len(bible) > 900:
+        bible = bible[:900]
 
     # --------------------------------------------------------
     # Generate 8 images
     # --------------------------------------------------------
 
-    for i, scene in enumerate(
+    for index, scene in enumerate(
         story["scenes"],
         1
     ):
 
-        img = WORK / f"scene_{i}.jpg"
+        image_path = (
+            WORK / f"scene_{index}.png"
+        )
 
         image_prompt = (
-            f"{bible}\n\n"
-            f"Scene {i}: "
-            f"{scene['image_prompt']}"
+            "CHARACTER BIBLE:\n"
+            + bible
+            + "\n\nSCENE:\n"
+            + str(scene["image_prompt"])
         )
 
         print(
-            f"Generating image {i}/8..."
+            "=" * 60
+        )
+
+        print(
+            f"Generating image {index}/8..."
         )
 
         generate_image(
             image_prompt,
-            img
+            image_path
         )
 
-        images.append(img)
-
+        images.append(
+            image_path
+        )
 
     # --------------------------------------------------------
     # Voice duration
@@ -620,6 +909,15 @@ def build_video(story, voice):
         voice
     )
 
+    print(
+        "Voice duration:",
+        round(total_voice, 2),
+        "seconds"
+    )
+
+    # --------------------------------------------------------
+    # Calculate scene durations
+    # --------------------------------------------------------
 
     weights = []
 
@@ -632,31 +930,17 @@ def build_video(story, voice):
             )
         )
 
-        weights.append(words)
+        weights.append(
+            words
+        )
 
+    total_weight = sum(
+        weights
+    )
 
-    total_weight = sum(weights)
+    durations = []
 
-
-    # --------------------------------------------------------
-    # Create clips
-    # --------------------------------------------------------
-
-    clips = []
-
-
-    for i, (
-        img,
-        scene,
-        weight
-    ) in enumerate(
-        zip(
-            images,
-            story["scenes"],
-            weights
-        ),
-        1
-    ):
+    for weight in weights:
 
         duration = max(
             3.5,
@@ -665,18 +949,57 @@ def build_video(story, voice):
             / total_weight
         )
 
-
-        clip = (
-            WORK
-            / f"clip_{i}.mp4"
+        durations.append(
+            duration
         )
 
+    # Make total visual duration match voice.
+    visual_total = sum(
+        durations
+    )
+
+    if visual_total < total_voice:
+
+        difference = (
+            total_voice
+            - visual_total
+        )
+
+        durations[-1] += difference
+
+    # --------------------------------------------------------
+    # Create clips
+    # --------------------------------------------------------
+
+    clips = []
+
+    for index, (
+        image,
+        scene,
+        duration
+    ) in enumerate(
+        zip(
+            images,
+            story["scenes"],
+            durations
+        ),
+        1
+    ):
+
+        clip = (
+            WORK / f"clip_{index}.mp4"
+        )
 
         text = esc(
             scene["text"]
         )
 
+        frames = max(
+            1,
+            int(duration * 30)
+        )
 
+        # Portrait crop + subtle zoom.
         vf = (
             "scale=1080:1920:"
             "force_original_aspect_ratio=increase,"
@@ -685,7 +1008,7 @@ def build_video(story, voice):
             "z='min(zoom+0.0008,1.08)':"
             "x='iw/2-(iw/zoom/2)':"
             "y='ih/2-(ih/zoom/2)':"
-            f"d={int(duration * 30)}:"
+            f"d={frames}:"
             "s=1080x1920:"
             "fps=30,"
             f"drawtext=text='{text}':"
@@ -701,15 +1024,19 @@ def build_video(story, voice):
             "boxborderw=24"
         )
 
+        print(
+            f"Building video clip "
+            f"{index}/8..."
+        )
 
-        run(
+        run_command(
             [
                 "ffmpeg",
                 "-y",
                 "-loop",
                 "1",
                 "-i",
-                str(img),
+                str(image),
                 "-t",
                 str(duration),
                 "-vf",
@@ -717,39 +1044,39 @@ def build_video(story, voice):
                 "-an",
                 "-c:v",
                 "libx264",
+                "-preset",
+                "veryfast",
                 "-pix_fmt",
                 "yuv420p",
-                str(clip),
+                str(clip)
             ]
         )
 
-
-        clips.append(clip)
-
+        clips.append(
+            clip
+        )
 
     # --------------------------------------------------------
     # Concatenate clips
     # --------------------------------------------------------
 
-    concat = (
+    concat_file = (
         WORK / "concat.txt"
     )
 
-    concat.write_text(
+    concat_file.write_text(
         "\n".join(
-            f"file '{x.as_posix()}'"
-            for x in clips
+            f"file '{clip.as_posix()}'"
+            for clip in clips
         ),
         encoding="utf-8"
     )
 
-
-    silent = (
+    silent_video = (
         WORK / "silent.mp4"
     )
 
-
-    run(
+    run_command(
         [
             "ffmpeg",
             "-y",
@@ -758,13 +1085,12 @@ def build_video(story, voice):
             "-safe",
             "0",
             "-i",
-            str(concat),
+            str(concat_file),
             "-c",
             "copy",
-            str(silent),
+            str(silent_video)
         ]
     )
-
 
     # --------------------------------------------------------
     # Background music
@@ -774,8 +1100,7 @@ def build_video(story, voice):
         WORK / "music.wav"
     )
 
-
-    run(
+    run_command(
         [
             "ffmpeg",
             "-y",
@@ -785,24 +1110,22 @@ def build_video(story, voice):
             "sine=frequency=330:"
             "sample_rate=44100",
             "-t",
-            "90",
+            "120",
             "-filter:a",
             "volume=0.025",
-            str(music),
+            str(music)
         ]
     )
-
 
     # --------------------------------------------------------
     # Mix voice + music
     # --------------------------------------------------------
 
-    mixed = (
+    mixed_audio = (
         WORK / "mixed.m4a"
     )
 
-
-    run(
+    run_command(
         [
             "ffmpeg",
             "-y",
@@ -815,10 +1138,10 @@ def build_video(story, voice):
             "loudnorm="
             "I=-16:"
             "TP=-1.5:"
-            "LRA=11[v];"
+            "LRA=11[voice];"
             "[1:a]"
-            "volume=0.30[m];"
-            "[v][m]"
+            "volume=0.30[music];"
+            "[voice][music]"
             "amix="
             "inputs=2:"
             "duration=first,"
@@ -830,23 +1153,22 @@ def build_video(story, voice):
             "aac",
             "-b:a",
             "128k",
-            str(mixed),
+            str(mixed_audio)
         ]
     )
-
 
     # --------------------------------------------------------
     # Final video
     # --------------------------------------------------------
 
-    run(
+    run_command(
         [
             "ffmpeg",
             "-y",
             "-i",
-            str(silent),
+            str(silent_video),
             "-i",
-            str(mixed),
+            str(mixed_audio),
             "-map",
             "0:v:0",
             "-map",
@@ -858,8 +1180,22 @@ def build_video(story, voice):
             "-b:a",
             "128k",
             "-shortest",
-            str(OUT),
+            str(OUT)
         ]
+    )
+
+    if (
+        not OUT.exists()
+        or OUT.stat().st_size == 0
+    ):
+
+        raise RuntimeError(
+            "Final video was not created."
+        )
+
+    print(
+        "FINAL VIDEO CREATED:",
+        OUT
     )
 
 
@@ -873,8 +1209,21 @@ def upload_youtube():
     from googleapiclient.http import MediaFileUpload
     from google.oauth2.credentials import Credentials
 
+    required = [
+        "YOUTUBE_REFRESH_TOKEN",
+        "YOUTUBE_CLIENT_ID",
+        "YOUTUBE_CLIENT_SECRET"
+    ]
 
-    creds = Credentials(
+    for key in required:
+
+        if not os.environ.get(key):
+
+            raise RuntimeError(
+                f"{key} is missing."
+            )
+
+    credentials = Credentials(
         None,
         refresh_token=os.environ[
             "YOUTUBE_REFRESH_TOKEN"
@@ -894,38 +1243,37 @@ def upload_youtube():
         ]
     )
 
-
     youtube = build(
         "youtube",
         "v3",
-        credentials=creds
+        credentials=credentials
     )
 
-
-    data = json.loads(
+    metadata = json.loads(
         META.read_text(
             encoding="utf-8"
         )
     )
 
+    title = (
+        metadata["title"][:95]
+        + " #Shorts"
+    )
+
+    description = (
+        metadata["hook"]
+        + "\n\n"
+        "🌈 Toon Kids पर रोज़ नई हिंदी कहानी!"
+        "\n❤️ इस कहानी से आपको क्या सीख मिली?"
+        "\n\n"
+        "#shorts #toonkids #hindistory "
+        "#kidsstory #moralstory #hindikahani"
+    )
 
     body = {
         "snippet": {
-            "title": (
-                data["title"][:95]
-                + " #Shorts"
-            ),
-
-            "description": (
-                data["hook"]
-                + "\n\n"
-                "🌈 Toon Kids पर रोज़ नई हिंदी कहानी!"
-                "\n❤️ इस कहानी से आपको क्या सीख मिली?"
-                "\n\n"
-                "#shorts #toonkids #hindistory "
-                "#kidsstory #moralstory #hindikahani"
-            ),
-
+            "title": title,
+            "description": description,
             "tags": [
                 "toon kids",
                 "hindi kids story",
@@ -936,16 +1284,17 @@ def upload_youtube():
                 "kids shorts",
                 "bedtime story"
             ],
-
             "categoryId": "27"
         },
-
         "status": {
             "privacyStatus": "public",
             "selfDeclaredMadeForKids": True
         }
     }
 
+    print(
+        "Uploading video to YouTube..."
+    )
 
     request = youtube.videos().insert(
         part="snippet,status",
@@ -957,9 +1306,7 @@ def upload_youtube():
         )
     )
 
-
     response = request.execute()
-
 
     print(
         "YouTube upload successful!"
@@ -981,6 +1328,23 @@ def main():
     print("TOON KIDS AUTOMATION STARTED")
     print("=" * 60)
 
+    # --------------------------------------------------------
+    # Environment check
+    # --------------------------------------------------------
+
+    required_env = [
+        "GEMINI_API_KEY",
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID"
+    ]
+
+    for key in required_env:
+
+        if not os.environ.get(key):
+
+            raise RuntimeError(
+                f"Required secret missing: {key}"
+            )
 
     # --------------------------------------------------------
     # Choose topic
@@ -992,7 +1356,6 @@ def main():
         "Selected topic:",
         topic
     )
-
 
     # --------------------------------------------------------
     # Generate story
@@ -1006,34 +1369,33 @@ def main():
         topic
     )
 
-
     print(
         "Story generated:",
         story["title"]
     )
 
-
     # --------------------------------------------------------
     # Save metadata
     # --------------------------------------------------------
 
+    metadata = {
+        "title": story["title"],
+        "hook": story["hook"],
+        "moral": story["moral"],
+        "topic": topic
+    }
+
     META.write_text(
         json.dumps(
-            {
-                "title": story["title"],
-                "hook": story["hook"],
-                "moral": story["moral"],
-                "topic": topic
-            },
+            metadata,
             ensure_ascii=False,
             indent=2
         ),
         encoding="utf-8"
     )
 
-
     # --------------------------------------------------------
-    # Generate Hindi voice
+    # Hindi voice
     # --------------------------------------------------------
 
     print(
@@ -1043,7 +1405,6 @@ def main():
     voice = tts(
         story
     )
-
 
     # --------------------------------------------------------
     # Build video
@@ -1058,19 +1419,6 @@ def main():
         voice
     )
 
-
-    if not OUT.exists():
-        raise RuntimeError(
-            "Final video was not created."
-        )
-
-
-    print(
-        "Video created:",
-        OUT
-    )
-
-
     # --------------------------------------------------------
     # Upload
     # --------------------------------------------------------
@@ -1083,12 +1431,7 @@ def main():
         == "true"
     )
 
-
     if upload_enabled:
-
-        print(
-            "Uploading to YouTube..."
-        )
 
         upload_youtube()
 
@@ -1098,11 +1441,14 @@ def main():
             "YouTube upload disabled."
         )
 
-
     print("=" * 60)
     print("TOON KIDS AUTOMATION COMPLETED")
     print("=" * 60)
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()
