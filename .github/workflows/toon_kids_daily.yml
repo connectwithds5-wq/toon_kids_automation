@@ -7,129 +7,54 @@ on:
     - cron: "30 7 * * *"   # 1:00 PM IST
     - cron: "0 15 * * *"   # 8:30 PM IST
 
-
 permissions:
   contents: write
-
 
 concurrency:
   group: toon-kids-ai-story
   cancel-in-progress: false
 
-
 jobs:
-
   make-short:
-
     runs-on: ubuntu-latest
 
     env:
-
-      # =====================================================
-      # GEMINI - STORY GENERATION
-      # =====================================================
-
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-
-      # Primary model
       GEMINI_TEXT_MODEL: gemini-3.6-flash
-
-      # Stable fallback used automatically by Python code
       GEMINI_FALLBACK_MODEL: gemini-3.5-flash-lite
 
-
-      # =====================================================
-      # CLOUDFLARE - IMAGE GENERATION
-      # =====================================================
-
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-
-      # =====================================================
-      # YOUTUBE
-      # =====================================================
-
       YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
-
       YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-
       YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
 
-
-      # =====================================================
-      # TTS - ENERGETIC KIDS VOICE
-      # =====================================================
-
-      TTS_RATE: "+18%"
-      TTS_PITCH: "+4Hz"
-
+      TTS_RATE: "+20%"
+      TTS_PITCH: "+5Hz"
       UPLOAD_YOUTUBE: "true"
-
-
-      # =====================================================
-      # RUN SLOT
-      # 0 = 1:00 PM IST
-      # 1 = 8:30 PM IST
-      # Manual run = manual
-      # =====================================================
 
       RUN_SLOT: ${{ github.event.schedule == '30 7 * * *' && '0' || github.event.schedule == '0 15 * * *' && '1' || 'manual' }}
 
-
     steps:
-
-      # =====================================================
-      # CHECKOUT
-      # =====================================================
-
       - name: Checkout repository
-
         uses: actions/checkout@v4
-
         with:
           fetch-depth: 0
 
-
-      # =====================================================
-      # PYTHON
-      # =====================================================
-
       - name: Setup Python
-
         uses: actions/setup-python@v5
-
         with:
           python-version: "3.11"
 
-
-      # =====================================================
-      # FFMPEG + FONTS
-      # =====================================================
-
       - name: Install FFmpeg
-
         run: |
-
           sudo apt-get update
-
-          sudo apt-get install -y \
-            ffmpeg \
-            fonts-noto-core \
-            fonts-noto-extra
-
-
-      # =====================================================
-      # PYTHON PACKAGES
-      # =====================================================
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
 
       - name: Install Python packages
-
         run: |
-
           python -m pip install --upgrade pip
-
           pip install \
             google-genai \
             google-api-python-client \
@@ -139,192 +64,68 @@ jobs:
             pillow \
             requests
 
-
-      # =====================================================
-      # CHECK ENVIRONMENT
-      # =====================================================
-
       - name: Validate secrets
-
         shell: bash
-
         run: |
-
           echo "Checking required secrets..."
-
-          test -n "$GEMINI_API_KEY" || {
-            echo "❌ Missing GEMINI_API_KEY"
-            exit 1
-          }
-
-          test -n "$CLOUDFLARE_API_TOKEN" || {
-            echo "❌ Missing CLOUDFLARE_API_TOKEN"
-            exit 1
-          }
-
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || {
-            echo "❌ Missing CLOUDFLARE_ACCOUNT_ID"
-            exit 1
-          }
-
-          test -n "$YOUTUBE_CLIENT_ID" || {
-            echo "❌ Missing YOUTUBE_CLIENT_ID"
-            exit 1
-          }
-
-          test -n "$YOUTUBE_CLIENT_SECRET" || {
-            echo "❌ Missing YOUTUBE_CLIENT_SECRET"
-            exit 1
-          }
-
-          test -n "$YOUTUBE_REFRESH_TOKEN" || {
-            echo "❌ Missing YOUTUBE_REFRESH_TOKEN"
-            exit 1
-          }
-
+          test -n "$GEMINI_API_KEY" || { echo "❌ Missing GEMINI_API_KEY"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "❌ Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "❌ Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          test -n "$YOUTUBE_CLIENT_ID" || { echo "❌ Missing YOUTUBE_CLIENT_ID"; exit 1; }
+          test -n "$YOUTUBE_CLIENT_SECRET" || { echo "❌ Missing YOUTUBE_CLIENT_SECRET"; exit 1; }
+          test -n "$YOUTUBE_REFRESH_TOKEN" || { echo "❌ Missing YOUTUBE_REFRESH_TOKEN"; exit 1; }
           echo "✅ All required secrets are present."
 
-
-      # =====================================================
-      # SHOW CONFIGURATION
-      # =====================================================
-
-      - name: Show configuration
-
+      - name: Show V4 configuration
         run: |
-
           echo "=========================================="
-          echo "TOON KIDS V3 CONFIGURATION"
+          echo "TOON KIDS V4 CONFIGURATION"
           echo "=========================================="
-
           echo "Python:"
           python --version
-
-          echo ""
           echo "FFmpeg:"
           ffmpeg -version | head -n 1
-
-          echo ""
-          echo "Gemini primary:"
-          echo "$GEMINI_TEXT_MODEL"
-
-          echo ""
-          echo "Gemini fallback:"
-          echo "$GEMINI_FALLBACK_MODEL"
-
-          echo ""
-          echo "Cloudflare image model:"
-          echo "@cf/black-forest-labs/flux-1-schnell"
-
-          echo ""
-          echo "TTS rate:"
-          echo "$TTS_RATE"
-
-          echo ""
-          echo "TTS pitch:"
-          echo "$TTS_PITCH"
-
-          echo ""
-          echo "Run slot:"
-          echo "$RUN_SLOT"
-
-          echo ""
-          echo "Upload to YouTube:"
-          echo "$UPLOAD_YOUTUBE"
-
-          echo ""
+          echo "Gemini primary: $GEMINI_TEXT_MODEL"
+          echo "Gemini fallback: $GEMINI_FALLBACK_MODEL"
+          echo "Cloudflare image model: @cf/black-forest-labs/flux-1-schnell"
+          echo "TTS rate: $TTS_RATE"
+          echo "TTS pitch: $TTS_PITCH"
+          echo "Run slot: $RUN_SLOT"
+          echo "Upload to YouTube: $UPLOAD_YOUTUBE"
           echo "=========================================="
 
-
-      # =====================================================
-      # GENERATE SHORT
-      # =====================================================
-
-      - name: Generate Toon Kids Short
-
+      - name: Generate Toon Kids V4 Short
         run: |
-
-          echo "=========================================="
-          echo "STARTING TOON KIDS V3"
-          echo "=========================================="
-
+          echo "Starting Toon Kids V4 generation..."
           python src/toon_kids_story.py
 
-
-      # =====================================================
-      # VERIFY VIDEO
-      # =====================================================
-
       - name: Verify video
-
         run: |
-
           echo "Checking generated files..."
-
-          test -s toon_kids_short.mp4 || {
-            echo "❌ toon_kids_short.mp4 not found"
-            exit 1
-          }
-
-          test -s story_metadata.json || {
-            echo "❌ story_metadata.json not found"
-            exit 1
-          }
-
+          test -s toon_kids_short.mp4 || { echo "❌ toon_kids_short.mp4 not found"; exit 1; }
+          test -s story_metadata.json || { echo "❌ story_metadata.json not found"; exit 1; }
           echo "✅ Video verification successful."
-
-          echo ""
-          echo "Generated video:"
           ls -lh toon_kids_short.mp4
-
-          echo ""
           echo "Metadata:"
           cat story_metadata.json
 
-
-      # =====================================================
-      # COMMIT STORY HISTORY
-      # =====================================================
-
       - name: Commit story history
-
         run: |
-
           git config user.name "github-actions[bot]"
-
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add story_history.json
-
           if git diff --cached --quiet; then
-
             echo "No story history changes."
-
           else
-
-            git commit \
-              -m "Update Toon Kids story history"
-
+            git commit -m "Update Toon Kids story history"
             git push
-
           fi
 
-
-      # =====================================================
-      # CLEANUP
-      # =====================================================
-
       - name: Cleanup
-
         if: always()
-
         run: |
-
           echo "Cleaning temporary files..."
-
           rm -rf work
-
           rm -f final.mp4
-
           echo "Cleanup completed."
+          
