@@ -2,7 +2,6 @@ name: Toon Kids AI Stories
 
 on:
   workflow_dispatch:
-
   schedule:
     - cron: "30 7 * * *"   # 1:00 PM IST
     - cron: "0 15 * * *"   # 8:30 PM IST
@@ -60,29 +59,33 @@ jobs:
       - name: Validate secrets
         shell: bash
         run: |
-          test -n "$GEMINI_API_KEY" || { echo "Missing GEMINI_API_KEY"; exit 1; }
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
-          test -n "$YOUTUBE_CLIENT_ID" || { echo "Missing YOUTUBE_CLIENT_ID"; exit 1; }
-          test -n "$YOUTUBE_CLIENT_SECRET" || { echo "Missing YOUTUBE_CLIENT_SECRET"; exit 1; }
-          test -n "$YOUTUBE_REFRESH_TOKEN" || { echo "Missing YOUTUBE_REFRESH_TOKEN"; exit 1; }
-          echo "All required secrets are present."
+          test -n "$GEMINI_API_KEY" || { echo "❌ Missing GEMINI_API_KEY"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "❌ Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "❌ Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          test -n "$YOUTUBE_CLIENT_ID" || { echo "❌ Missing YOUTUBE_CLIENT_ID"; exit 1; }
+          test -n "$YOUTUBE_CLIENT_SECRET" || { echo "❌ Missing YOUTUBE_CLIENT_SECRET"; exit 1; }
+          test -n "$YOUTUBE_REFRESH_TOKEN" || { echo "❌ Missing YOUTUBE_REFRESH_TOKEN"; exit 1; }
+          echo "✅ All required secrets are present."
 
       - name: Validate Python before generation
         run: |
           python -m py_compile src/toon_kids_story.py
-          echo "Python syntax OK."
+          echo "✅ Python syntax OK."
 
       - name: Show configuration
         run: |
-          echo "TOON KIDS V6"
+          echo "=========================================="
+          echo "TOON KIDS V7"
+          echo "=========================================="
           python --version
           ffmpeg -version | head -n 1
-          echo "Gemini: $GEMINI_TEXT_MODEL"
+          echo "Gemini primary: $GEMINI_TEXT_MODEL"
           echo "Gemini fallback: $GEMINI_FALLBACK_MODEL"
           echo "Cloudflare image model: $CLOUDFLARE_IMAGE_MODEL"
           echo "TTS: $TTS_RATE / $TTS_PITCH"
           echo "Run slot: $RUN_SLOT"
+          echo "Upload: $UPLOAD_YOUTUBE"
+          echo "=========================================="
 
       - name: Generate Toon Kids Short
         run: |
@@ -90,11 +93,10 @@ jobs:
 
       - name: Verify video
         run: |
-          test -s toon_kids_short.mp4 || { echo "Video missing"; exit 1; }
-          test -s story_metadata.json || { echo "Metadata missing"; exit 1; }
-          echo "Video:"
+          test -s toon_kids_short.mp4 || { echo "❌ Video missing"; exit 1; }
+          test -s story_metadata.json || { echo "❌ Metadata missing"; exit 1; }
+          echo "✅ Video generated successfully."
           ls -lh toon_kids_short.mp4
-          echo "Metadata:"
           cat story_metadata.json
 
       - name: Commit story history
@@ -115,4 +117,3 @@ jobs:
           rm -rf work
           rm -f final.mp4
           echo "Cleanup completed."
-          
