@@ -39,11 +39,13 @@ FALLBACK_TEXT_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"
 CLOUDFLARE_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 RUN_SLOT = os.getenv("RUN_SLOT", "manual")
 
-TTS_RATE = os.getenv("TTS_RATE", "+18%")
-TTS_PITCH = os.getenv("TTS_PITCH", "+4Hz")
+TTS_RATE = os.getenv("TTS_RATE", "+20%")
+TTS_PITCH = os.getenv("TTS_PITCH", "+5Hz")
 
 SCENE_COUNT = 10
-MAX_DUPLICATE_RETRIES = 6
+MAX_DUPLICATE_RETRIES = 8
+TARGET_MIN_SECONDS = 48
+TARGET_MAX_SECONDS = 60
 
 
 # ============================================================
@@ -296,8 +298,9 @@ RANDOM STORY DNA:
 TARGET:
 Children ages 4-10.
 Natural spoken Hindi. Fun, energetic, simple vocabulary.
-Target 50-60 seconds.
-TOTAL NARRATION: about 135-165 Hindi words including the moral.
+Target 48-60 seconds.
+TOTAL NARRATION: about 120-135 Hindi words including the moral.
+Keep each scene narration extremely short so the finished voice normally stays under 60 seconds.
 
 IMPORTANT NOVELTY RULE:
 Never copy or closely imitate an earlier story.
@@ -314,12 +317,16 @@ Every scene MUST contain:
 - action: a visible physical action or discovery
 - emotion: clear facial/body emotion
 - camera: a specific dynamic camera direction
-- image_prompt: detailed visual prompt
+- image_prompt: detailed visual prompt for the FIRST visual beat
+- image_prompt_2: detailed visual prompt for the SECOND visual beat, showing a clear change in action/composition
+- visual_change: describe exactly what changes between the two visual beats
 - sfx: one of "pop", "whoosh", "sparkle", "boing", "giggle", "none"
 
 VISUAL PACING:
 Every scene must visibly change something.
 NO static portrait scenes.
+Each scene has TWO distinct visual beats. Beat 1 establishes an action; Beat 2 shows the action progressing, reacting, revealing, or resolving.
+The second visual beat must NOT be the same pose or composition as the first.
 Use running, jumping, opening, chasing, hiding, discovering, reacting,
 falling safely, spinning, pointing, laughing, helping, flying, splashing,
 or another clear child-friendly action.
@@ -364,6 +371,8 @@ Return ONLY valid JSON:
       "emotion": "...",
       "camera": "...",
       "image_prompt": "...",
+      "image_prompt_2": "...",
+      "visual_change": "...",
       "sfx": "..."
     }}
   ],
@@ -404,7 +413,8 @@ Return ONLY valid JSON:
 
                 required_scene = [
                     "narration", "text", "action", "emotion",
-                    "camera", "image_prompt", "sfx"
+                    "camera", "image_prompt", "image_prompt_2",
+                    "visual_change", "sfx"
                 ]
                 valid_sfx = {
                     "pop", "whoosh", "sparkle", "boing", "giggle", "none"
@@ -712,95 +722,135 @@ def make_music(path, duration=70.0):
 # ============================================================
 
 def build_video(story, voice_files):
+    """Build a fast 10-scene short with TWO visual beats per scene."""
     images = []
     bible = str(story["character_bible"])
-    if len(bible) > 850:
-        bible = bible[:850]
+    if len(bible) > 780:
+        bible = bible[:780]
 
-    # Generate all scene images.
+    # --------------------------------------------------------
+    # Generate 20 visual keyframes: 2 genuinely different beats
+    # for every one of the 10 story scenes.
+    # --------------------------------------------------------
     for index, scene in enumerate(story["scenes"], 1):
-        image_path = WORK / f"scene_{index:02d}.png"
-        image_prompt = (
-            "CHARACTER BIBLE:\n" + bible +
-            "\n\nACTION:\n" + str(scene.get("action", "")) +
-            "\n\nEMOTION:\n" + str(scene.get("emotion", "")) +
-            "\n\nCAMERA:\n" + str(scene.get("camera", "")) +
-            "\n\nSCENE:\n" + str(scene["image_prompt"])
+        scene_images = []
+        for beat in (1, 2):
+            image_path = WORK / f"scene_{index:02d}_{beat}.png"
+            prompt_key = "image_prompt" if beat == 1 else "image_prompt_2"
+            image_prompt = (
+                "CHARACTER BIBLE:\n" + bible +
+                "\n\nACTION:\n" + str(scene.get("action", "")) +
+                "\n\nEMOTION:\n" + str(scene.get("emotion", "")) +
+                "\n\nCAMERA:\n" + str(scene.get("camera", "")) +
+                "\n\nVISUAL CHANGE:\n" + str(scene.get("visual_change", "")) +
+                f"\n\nBEAT {beat}:\n" + str(scene.get(prompt_key, scene.get("image_prompt", "")))
+            )
+            print("=" * 60)
+            print(f"Generating image {index}/{SCENE_COUNT}, beat {beat}/2...")
+            generate_image(image_prompt, image_path)
+            scene_images.append(image_path)
+        images.append(scene_images)
+
+    # Actual voice duration drives every visual beat.
+    scene_durations = [max(3.8, ffprobe_duration(v)) for v in voice_files]
+    total_duration = sum(scene_durations)
+    print("Scene voice durations:", [round(x, 2) for x in scene_durations])
+    print("Total duration:", round(total_duration, 2), "seconds")
+
+    if total_duration > TARGET_MAX_SECONDS:
+        print(
+            f"WARNING: voice duration {total_duration:.2f}s exceeds "
+            f"target {TARGET_MAX_SECONDS}s. Keeping audio/visual sync."
         )
-
-        print("=" * 60)
-        print(f"Generating image {index}/{SCENE_COUNT}...")
-        generate_image(image_prompt, image_path)
-        images.append(image_path)
-
-    # Each visual duration follows the actual scene voice.
-    durations = [max(2.7, ffprobe_duration(v)) for v in voice_files]
-    print("Scene durations:", [round(x, 2) for x in durations])
-    print("Total duration:", round(sum(durations), 2), "seconds")
 
     clips = []
     scene_audio = []
 
-    for index, (image, scene, duration, voice) in enumerate(
-        zip(images, story["scenes"], durations, voice_files), 1
+    for index, (scene_images, scene, duration, voice) in enumerate(
+        zip(images, story["scenes"], scene_durations, voice_files), 1
     ):
-        clip = WORK / f"clip_{index:02d}.mp4"
-        text = esc(scene["text"])
-        frames = max(1, int(duration * 30))
+        # Two quick visual beats within each spoken scene.
+        beat1 = max(1.55, duration * 0.48)
+        beat2 = max(1.55, duration - beat1)
+        beat_durations = [beat1, beat2]
 
-        # Alternate camera motion to avoid slideshow feel.
-        if index % 4 == 1:
-            zoom = (
-                "zoompan=z='min(zoom+0.0012,1.12)':"
-                "x='iw/2-(iw/zoom/2)':"
-                "y='ih/2-(ih/zoom/2)'"
-            )
-        elif index % 4 == 2:
-            zoom = (
-                "zoompan=z='min(zoom+0.0010,1.10)':"
-                "x='iw/2-(iw/zoom/2)+on*0.18':"
-                "y='ih/2-(ih/zoom/2)'"
-            )
-        elif index % 4 == 3:
-            zoom = (
-                "zoompan=z='max(1.10-on*0.0008,1.0)':"
-                "x='iw/2-(iw/zoom/2)-on*0.12':"
-                "y='ih/2-(ih/zoom/2)'"
-            )
-        else:
-            zoom = (
-                "zoompan=z='min(zoom+0.0011,1.11)':"
-                "x='iw/2-(iw/zoom/2)':"
-                "y='ih/2-(ih/zoom/2)+on*0.10'"
+        for beat_index, (image, beat_duration) in enumerate(
+            zip(scene_images, beat_durations), 1
+        ):
+            clip = WORK / f"clip_{index:02d}_{beat_index}.mp4"
+            text = esc(scene["text"] if beat_index == 1 else "")
+            frames = max(1, int(beat_duration * 30))
+
+            # Deliberately varied camera motion. The second beat reverses
+            # direction so the viewer gets a visible change even though
+            # the source is a still frame.
+            if beat_index == 1:
+                if index % 3 == 1:
+                    zoom = (
+                        "zoompan=z='min(zoom+0.0018,1.14)':"
+                        "x='iw/2-(iw/zoom/2)':"
+                        "y='ih/2-(ih/zoom/2)'")
+                elif index % 3 == 2:
+                    zoom = (
+                        "zoompan=z='min(zoom+0.0015,1.12)':"
+                        "x='iw/2-(iw/zoom/2)-on*0.16':"
+                        "y='ih/2-(ih/zoom/2)'")
+                else:
+                    zoom = (
+                        "zoompan=z='max(1.12-on*0.0010,1.0)':"
+                        "x='iw/2-(iw/zoom/2)+on*0.14':"
+                        "y='ih/2-(ih/zoom/2)'")
+            else:
+                if index % 3 == 1:
+                    zoom = (
+                        "zoompan=z='max(1.13-on*0.0009,1.0)':"
+                        "x='iw/2-(iw/zoom/2)+on*0.18':"
+                        "y='ih/2-(ih/zoom/2)'")
+                elif index % 3 == 2:
+                    zoom = (
+                        "zoompan=z='min(zoom+0.0017,1.14)':"
+                        "x='iw/2-(iw/zoom/2)':"
+                        "y='ih/2-(ih/zoom/2)-on*0.13'")
+                else:
+                    zoom = (
+                        "zoompan=z='min(zoom+0.0014,1.12)':"
+                        "x='iw/2-(iw/zoom/2)-on*0.16':"
+                        "y='ih/2-(ih/zoom/2)'")
+
+            drawtext = ""
+            if text:
+                drawtext = (
+                    ",drawtext=text='" + text + "':"
+                    "fontcolor=white:fontsize=58:"
+                    "fontfile=/usr/share/fonts/truetype/noto/"
+                    "NotoSansDevanagari-Regular.ttf:"
+                    "x=(w-text_w)/2:y=h-text_h-190:"
+                    "shadowcolor=black@0.90:shadowx=3:shadowy=3"
+                )
+
+            vf = (
+                "scale=1080:1920:force_original_aspect_ratio=increase,"
+                "crop=1080:1920," + zoom +
+                f":d={frames}:s=1080x1920:fps=30" + drawtext
             )
 
-        vf = (
-            "scale=1080:1920:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,"
-            + zoom +
-            f":d={frames}:s=1080x1920:fps=30,"
-            "drawtext=text='" + text + "':"
-            "fontcolor=white:fontsize=58:"
-            "fontfile=/usr/share/fonts/truetype/noto/"
-            "NotoSansDevanagari-Regular.ttf:"
-            "x=(w-text_w)/2:y=h-text_h-190:"
-            "shadowcolor=black@0.90:shadowx=3:shadowy=3"
-        )
+            print(
+                f"Building visual beat {index}/{SCENE_COUNT} "
+                f"beat {beat_index}/2..."
+            )
+            run_command([
+                "ffmpeg", "-y", "-loop", "1",
+                "-i", str(image),
+                "-t", str(beat_duration),
+                "-vf", vf,
+                "-an", "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-pix_fmt", "yuv420p",
+                str(clip)
+            ])
+            clips.append(clip)
 
-        print(f"Building visual clip {index}/{SCENE_COUNT}...")
-        run_command([
-            "ffmpeg", "-y", "-loop", "1",
-            "-i", str(image),
-            "-t", str(duration),
-            "-vf", vf,
-            "-an", "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-pix_fmt", "yuv420p",
-            str(clip)
-        ])
-        clips.append(clip)
-
-        # Scene voice + tiny SFX.
+        # Audio remains exactly one scene long, preserving narration sync.
         sfx_name = scene.get("sfx", "none")
         audio_out = WORK / f"scene_audio_{index:02d}.m4a"
 
@@ -816,7 +866,7 @@ def build_video(story, voice_files):
                 "-i", str(sfx),
                 "-filter_complex",
                 "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[v];"
-                "[1:a]adelay=120|120,volume=0.55[s];"
+                "[1:a]adelay=120|120,volume=0.48[s];"
                 "[v][s]amix=inputs=2:duration=first,"
                 "loudnorm=I=-15:TP=-1.5:LRA=10[a]",
                 "-map", "[a]",
@@ -825,8 +875,7 @@ def build_video(story, voice_files):
             ])
         else:
             run_command([
-                "ffmpeg", "-y",
-                "-i", str(voice),
+                "ffmpeg", "-y", "-i", str(voice),
                 "-filter:a", "loudnorm=I=-16:TP=-1.5:LRA=11",
                 "-c:a", "aac", "-b:a", "128k",
                 str(audio_out)
@@ -834,41 +883,36 @@ def build_video(story, voice_files):
 
         scene_audio.append(audio_out)
 
-    # Concatenate video.
+    # Concatenate all 20 visual beats.
     concat_file = WORK / "concat.txt"
     concat_file.write_text(
         "\n".join(f"file '{c.as_posix()}'" for c in clips),
         encoding="utf-8"
     )
-
     silent_video = WORK / "silent.mp4"
     run_command([
-        "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", str(concat_file),
-        "-c", "copy",
-        str(silent_video)
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", str(concat_file), "-c", "copy", str(silent_video)
     ])
 
-    # Concatenate scene audio so voice and visuals stay locked.
+    # Concatenate scene audio.
     audio_concat = WORK / "audio_concat.txt"
     audio_concat.write_text(
         "\n".join(f"file '{a.as_posix()}'" for a in scene_audio),
         encoding="utf-8"
     )
-
     narration_audio = WORK / "narration_mix.m4a"
     run_command([
-        "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", str(audio_concat),
-        "-c:a", "aac", "-b:a", "128k",
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", str(audio_concat), "-c:a", "aac", "-b:a", "128k",
         str(narration_audio)
     ])
 
-    # Playful original background melody.
-    music = make_music(WORK / "music.wav", max(70.0, sum(durations) + 5))
-
+    # Keep the music clearly underneath narration.
+    music = make_music(
+        WORK / "music.wav",
+        max(65.0, total_duration + 4)
+    )
     mixed_audio = WORK / "mixed.m4a"
     run_command([
         "ffmpeg", "-y",
@@ -876,11 +920,10 @@ def build_video(story, voice_files):
         "-i", str(music),
         "-filter_complex",
         "[0:a]volume=1.0[voice];"
-        "[1:a]volume=0.22[music];"
+        "[1:a]volume=0.16[music];"
         "[voice][music]amix=inputs=2:duration=first,"
         "loudnorm=I=-14:TP=-1:LRA=10[a]",
-        "-map", "[a]",
-        "-c:a", "aac", "-b:a", "128k",
+        "-map", "[a]", "-c:a", "aac", "-b:a", "128k",
         str(mixed_audio)
     ])
 
@@ -888,12 +931,9 @@ def build_video(story, voice_files):
         "ffmpeg", "-y",
         "-i", str(silent_video),
         "-i", str(mixed_audio),
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "128k",
-        "-shortest",
-        str(OUT)
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+        "-shortest", str(OUT)
     ])
 
     if not OUT.exists() or OUT.stat().st_size == 0:
@@ -983,7 +1023,7 @@ def upload_youtube():
 
 def main():
     print("=" * 60)
-    print("TOON KIDS AUTOMATION V3 STARTED")
+    print("TOON KIDS AUTOMATION V4 STARTED")
     print("=" * 60)
 
     required_env = [
@@ -1053,7 +1093,9 @@ def main():
             "hook": story["hook"],
             "moral": story["moral"],
             "topic": topic,
-            "scenes": SCENE_COUNT
+            "scenes": SCENE_COUNT,
+            "visual_beats_per_scene": 2,
+            "target_duration": "48-60 seconds"
         }, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
@@ -1074,9 +1116,10 @@ def main():
         print("YouTube upload disabled.")
 
     print("=" * 60)
-    print("TOON KIDS AUTOMATION V3 COMPLETED")
+    print("TOON KIDS AUTOMATION V4 COMPLETED")
     print("=" * 60)
 
 
 if __name__ == "__main__":
     main()
+
