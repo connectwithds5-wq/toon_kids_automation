@@ -2,7 +2,6 @@ name: Toon Kids AI Stories
 
 on:
   workflow_dispatch:
-
   schedule:
     - cron: "30 7 * * *"   # 1:00 PM IST
     - cron: "0 15 * * *"   # 8:30 PM IST
@@ -17,7 +16,6 @@ concurrency:
 jobs:
   make-short:
     runs-on: ubuntu-latest
-
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_TEXT_MODEL: gemini-3.6-flash
@@ -30,8 +28,8 @@ jobs:
       YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
 
-      TTS_RATE: "+20%"
-      TTS_PITCH: "+5Hz"
+      TTS_RATE: "+18%"
+      TTS_PITCH: "+4Hz"
       UPLOAD_YOUTUBE: "true"
 
       RUN_SLOT: ${{ github.event.schedule == '30 7 * * *' && '0' || github.event.schedule == '0 15 * * *' && '1' || 'manual' }}
@@ -47,7 +45,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg and fonts
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
@@ -76,14 +74,12 @@ jobs:
           test -n "$YOUTUBE_REFRESH_TOKEN" || { echo "❌ Missing YOUTUBE_REFRESH_TOKEN"; exit 1; }
           echo "✅ All required secrets are present."
 
-      - name: Show V4 configuration
+      - name: Show configuration
         run: |
           echo "=========================================="
-          echo "TOON KIDS V4 CONFIGURATION"
+          echo "TOON KIDS V5"
           echo "=========================================="
-          echo "Python:"
           python --version
-          echo "FFmpeg:"
           ffmpeg -version | head -n 1
           echo "Gemini primary: $GEMINI_TEXT_MODEL"
           echo "Gemini fallback: $GEMINI_FALLBACK_MODEL"
@@ -91,20 +87,19 @@ jobs:
           echo "TTS rate: $TTS_RATE"
           echo "TTS pitch: $TTS_PITCH"
           echo "Run slot: $RUN_SLOT"
-          echo "Upload to YouTube: $UPLOAD_YOUTUBE"
+          echo "Upload: $UPLOAD_YOUTUBE"
           echo "=========================================="
 
-      - name: Generate Toon Kids V4 Short
+      - name: Generate Toon Kids V5 Short
         run: |
-          echo "Starting Toon Kids V4 generation..."
+          python -m py_compile src/toon_kids_story.py
           python src/toon_kids_story.py
 
       - name: Verify video
         run: |
-          echo "Checking generated files..."
-          test -s toon_kids_short.mp4 || { echo "❌ toon_kids_short.mp4 not found"; exit 1; }
-          test -s story_metadata.json || { echo "❌ story_metadata.json not found"; exit 1; }
-          echo "✅ Video verification successful."
+          test -s toon_kids_short.mp4 || { echo "❌ Video missing"; exit 1; }
+          test -s story_metadata.json || { echo "❌ Metadata missing"; exit 1; }
+          echo "✅ Video created"
           ls -lh toon_kids_short.mp4
           echo "Metadata:"
           cat story_metadata.json
@@ -124,7 +119,6 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          echo "Cleaning temporary files..."
           rm -rf work
           rm -f final.mp4
           echo "Cleanup completed."
