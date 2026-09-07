@@ -18,7 +18,7 @@ from google import genai
 from google.genai import types
 
 # ============================================================
-# TOON KIDS V6 — CHARACTER-CONTINUITY STORY ENGINE
+# TOON KIDS V7 — STABLE CHARACTER-CONTINUITY STORY ENGINE
 # ============================================================
 
 BASE = Path(__file__).resolve().parent.parent
@@ -36,6 +36,7 @@ TTS_PITCH = os.getenv("TTS_PITCH", "+3Hz")
 RUN_SLOT = os.getenv("RUN_SLOT", "manual")
 SCENE_COUNT = 10
 MAX_DUPLICATE_RETRIES = 8
+IMAGE_MIN_GAP_SECONDS = 3.0
 TARGET_MIN_SECONDS = 48
 TARGET_MAX_SECONDS = 60
 
@@ -256,16 +257,15 @@ LANGUAGE: natural spoken Hindi, very simple words, energetic and funny.
 TARGET: 50-58 seconds, 110-125 Hindi words including the moral.
 EXACTLY 10 SCENES.
 
-CORE RULE — STORY/IMAGE MATCH:
-The image for every scene MUST directly show what that scene's narration says.
-Do not write vague image prompts. Each image prompt must name the exact main character,
-exact object, exact location, exact physical action, and the visible result of that action.
-If narration says "picked up the golden key", the image must visibly show the hero holding
-the golden key. If narration says "door opened", the image must visibly show the door opening.
+STORY/IMAGE MATCH IS MANDATORY:
+Every scene image must literally depict the main action described by that scene's narration.
+Never use generic character portraits. If narration says the hero grabs a golden key,
+show the SAME hero physically holding the golden key. If narration says the door opens,
+show the SAME door visibly opening. Keep objects and locations visually continuous.
 
 STORY ARC:
 1. 0-3 sec: immediate visual hook already in progress; no greeting.
-2. Introduce hero + goal.
+2. Introduce hero + concrete goal.
 3. First obstacle.
 4. Obstacle gets worse.
 5. Funny mistake/reaction.
@@ -281,26 +281,25 @@ EVERY SCENE MUST:
 - contain one concrete visual event
 - show a clear emotion/reaction
 - use a distinct camera composition
-- carry forward the same object/location state from the previous scene
+- carry forward the same important object/location state from the previous scene
 
 CHARACTER LOCK:
 - ONLY ONE MAIN CHARACTER: the locked character above.
 - NO humans, boys, girls, human children, human heroes, or replacement protagonists.
-- Supporting animals may appear only when the story requires them, but they must never replace the hero.
-- Every image_prompt MUST start with the locked character description or a near-verbatim version.
-- The hero's species, color, eyes, clothes, accessory, face and body proportions MUST stay identical.
+- Supporting animals may appear only when necessary and must never replace the hero.
+- Every image_prompt must explicitly repeat the locked character identity.
 
 VISUAL CONTINUITY:
-Scene 1 establishes the world and the important object.
-Scenes 2-8 must preserve the same world and object design unless the narration explicitly changes it.
-Scene 9 must show the exact payoff/reveal.
-Scene 10 must show the hero celebrating the result of the same story.
+Scene 1 establishes the world and important object.
+Scenes 2-8 preserve the same world and object design unless narration explicitly changes them.
+Scene 9 shows the exact payoff/reveal.
+Scene 10 shows the same hero celebrating the result.
 
 IMAGE PROMPT RULES:
 - 3D animated children's movie, colorful, cinematic, expressive.
 - ACTION, not portrait.
-- Clearly visible interaction between hero and story object/environment.
-- Use varied compositions: wide, close-up, low-angle, overhead, tracking, reveal, reaction.
+- Show the hero physically interacting with the exact story object/environment.
+- Varied compositions: wide, close-up, low-angle, overhead, tracking, reveal, reaction.
 - No written words, letters, signs, captions, logos, brands, UI, watermark.
 - No horror, violence, weapons, politics or adult themes.
 - NEVER depict a human as the main character.
@@ -313,41 +312,28 @@ Each scene fields:
 - camera: shot/composition
 - visual_event: what visibly changes
 - continuity: what must remain from previous scene
-- image_prompt: ONE detailed first/only frame prompt that directly matches narration
+- image_prompt: one detailed prompt that directly matches narration
 - sfx: one of {SFX}
 
 PREVIOUS STORIES TO AVOID:
 {avoid}
 
-Return ONLY valid JSON:
-{{
-  "title": "...",
-  "hook": "...",
-  "character_bible": "{locked}",
-  "scenes": [
-    {{
-      "narration": "...",
-      "text": "...",
-      "action": "...",
-      "emotion": "...",
-      "camera": "...",
-      "visual_event": "...",
-      "continuity": "...",
-      "image_prompt": "...",
-      "sfx": "..."
-    }}
-  ],
-  "moral": "..."
-}}
-"""
+Return ONLY valid JSON.
+""".strip()
+
+    # Important V7 behavior: switch to the fallback immediately on a retryable
+    # primary-model outage instead of wasting all primary retries.
+    models = []
+    for model in (TEXT_MODEL, FALLBACK_TEXT_MODEL):
+        if model and model not in models:
+            models.append(model)
 
     last_exc = None
-    for model in [TEXT_MODEL, FALLBACK_TEXT_MODEL]:
-        if not model:
-            continue
-        for attempt in range(3):
+    for model_index, model in enumerate(models):
+        attempts = 2 if model_index == 0 else 3
+        for attempt in range(attempts):
             try:
-                print(f"Gemini model={model}, attempt={attempt+1}/3")
+                print(f"Gemini model={model}, attempt={attempt+1}/{attempts}")
                 response = client.models.generate_content(
                     model=model,
                     contents=prompt,
@@ -364,23 +350,33 @@ Return ONLY valid JSON:
                     if not story.get(key):
                         raise ValueError(f"Story missing {key}")
                 required = ["narration", "text", "action", "emotion", "camera", "visual_event", "continuity", "image_prompt", "sfx"]
+                species = locked.split("मुख्य नायक: छोटा प्यारा ", 1)[-1].split(";", 1)[0]
                 for i, scene in enumerate(scenes, 1):
                     for key in required:
                         if not scene.get(key):
                             raise ValueError(f"Scene {i} missing {key}")
                     if scene["sfx"] not in SFX:
                         scene["sfx"] = "none"
-                    # Basic semantic guard: every prompt must contain the locked species.
-                    species = locked.split("मुख्य नायक: छोटा प्यारा ",1)[-1].split(";",1)[0]
+                    # Prevent a weak/short prompt from losing the character identity.
                     if species not in scene["image_prompt"]:
                         scene["image_prompt"] = f"{locked} {scene['image_prompt']}"
                 story["character_bible"] = locked
                 return story
             except Exception as exc:
                 last_exc = exc
-                print("Gemini story error:", str(exc))
-                time.sleep((8 if is_retryable_gemini(exc) else 5) * (attempt + 1))
-    raise RuntimeError(f"Gemini story generation failed: {last_exc}")
+                print(f"Gemini {model} error: {exc}")
+                if is_retryable_gemini(exc):
+                    # For primary 503/429, move to fallback immediately.
+                    if model_index == 0:
+                        print(f"Primary Gemini unavailable; switching to fallback {FALLBACK_TEXT_MODEL}")
+                        break
+                    wait = min(30, 5 * (attempt + 1))
+                else:
+                    wait = 4 * (attempt + 1)
+                if attempt < attempts - 1:
+                    time.sleep(wait)
+
+    raise RuntimeError(f"Gemini story generation failed on all models: {last_exc}")
 
 # ============================================================
 # IMAGE GENERATION
@@ -405,72 +401,92 @@ def generate_image(prompt, filename, reference_paths=None, width=1024, height=17
 
     url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{CLOUDFLARE_IMAGE_MODEL}"
     source = str(prompt).strip()
-    if len(source) > 1800:
-        source = source[:1800]
+    if len(source) > 1700:
+        source = source[:1700]
 
     full_prompt = f"""
 Premium 3D animated children's movie frame, vertical 9:16.
 
-REFERENCE CONTINUITY:
-If a reference image is supplied, preserve the exact identity of the main character from it:
-same species, face, eye color, body proportions, fur/skin color, clothing and accessories.
-Do NOT replace the character with a human or a different character.
+REFERENCE IMAGE RULES:
+Image 0 is the locked master character. Preserve that exact character identity.
+If image 1 is supplied, it is the previous scene and must be used for environment/object continuity.
+Do not replace the hero with another character. Do not turn the hero into a human.
 
 STORY VISUAL:
 {source}
 
-The main character MUST be visibly performing the stated action and visibly interacting
-with the stated object/environment. The scene must look like a real moment from one continuous
-animated story, not a character portrait or a random poster.
+The hero must be visibly performing the exact stated action and visibly interacting with the
+exact stated object/environment. This is a single frame from one continuous children's movie,
+not a portrait, poster, character sheet, collage, or random scene.
 
-STYLE: polished family-friendly 3D animation, colorful, warm cinematic light,
-strong depth, expressive face, clear foreground/midground/background, child-friendly.
+STYLE: polished family-friendly 3D animation, colorful, warm cinematic light, strong depth,
+expressive face, clear foreground/midground/background, child-friendly.
 
-ABSOLUTELY NO written words, letters, captions, subtitles, speech bubbles, logos,
-watermarks, UI, brand marks, human protagonist, horror or violence.
+NO TEXT OR GRAPHICS: no written words, letters, captions, subtitles, speech bubbles, logos,
+watermarks, UI, brand marks, signs, labels. No human protagonist. No horror or violence.
 """.strip()
 
     refs = [_small_reference(x) for x in (reference_paths or [])][:2]
-
-    for attempt in range(4):
+    # Cloudflare documents input_image_0/input_image_1 as the exact field names,
+    # with each reference smaller than 512x512.
+    for attempt in range(5):
         handles = []
         try:
-            # FLUX.2 on Cloudflare requires multipart/form-data and supports reference images.
-            files = []
-            # Use an empty multipart field for text-only generation.
-            if refs:
-                for idx, ref in enumerate(refs):
-                    h = open(ref, "rb")
-                    handles.append(h)
-                    files.append((f"input_image_{idx}", (ref.name, h, "image/png")))
-            data = [
-                ("prompt", full_prompt),
-                ("width", str(width)),
-                ("height", str(height)),
-                ("guidance", "4")
-            ]
+            if attempt == 0:
+                time.sleep(IMAGE_MIN_GAP_SECONDS)
+
+            multipart = {"prompt": (None, full_prompt),
+                         "width": (None, str(width)),
+                         "height": (None, str(height)),
+                         "guidance": (None, "4")}
+            for idx, ref in enumerate(refs):
+                h = open(ref, "rb")
+                handles.append(h)
+                multipart[f"input_image_{idx}"] = (ref.name, h, "image/png")
+
             response = requests.post(
                 url,
                 headers={"Authorization": f"Bearer {api_token}"},
-                data=data,
-                files=files if files else {"_multipart": (None, "1")},
+                files=multipart,
                 timeout=240
             )
+
             if response.status_code == 429:
-                if attempt == 3:
-                    raise RuntimeError("Cloudflare rate limit after retries.")
-                time.sleep(15 * (attempt + 1))
+                body = response.text[:3000]
+                # Daily allocation exhaustion will not recover by retrying.
+                if "3036" in body or "daily free allocation" in body.lower() or "10,000 neurons" in body.lower():
+                    raise RuntimeError(
+                        "Cloudflare daily Workers AI allocation exhausted (10,000 neurons). "
+                        "Retrying will not help until the allocation resets or billing is enabled."
+                    )
+                if attempt == 4:
+                    raise RuntimeError(f"Cloudflare 429 after retries: {body}")
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    wait = float(retry_after) if retry_after else min(120, 30 * (attempt + 1))
+                except ValueError:
+                    wait = min(120, 30 * (attempt + 1))
+                wait += secrets.randbelow(6)
+                print(f"Cloudflare 429/out-of-capacity. Waiting {wait:.0f}s before retry...")
+                time.sleep(wait)
                 continue
+
             if response.status_code >= 500:
-                if attempt == 3:
-                    raise RuntimeError(f"Cloudflare server error {response.status_code}: {response.text[:1000]}")
-                time.sleep(10 * (attempt + 1))
+                if attempt == 4:
+                    raise RuntimeError(f"Cloudflare server error {response.status_code}: {response.text[:1500]}")
+                wait = min(90, 15 * (attempt + 1)) + secrets.randbelow(5)
+                print(f"Cloudflare {response.status_code}. Waiting {wait}s...")
+                time.sleep(wait)
                 continue
+
             if response.status_code >= 400:
-                raise RuntimeError(f"Cloudflare HTTP {response.status_code}: {response.text[:2000]}")
+                raise RuntimeError(f"Cloudflare HTTP {response.status_code}: {response.text[:2500]}")
+
             data_json = response.json()
             if not data_json.get("success"):
-                raise RuntimeError("Cloudflare image error: " + str(data_json.get("errors", [])))
+                errors = data_json.get("errors", [])
+                raise RuntimeError("Cloudflare image error: " + str(errors))
+
             image_b64 = data_json.get("result", {}).get("image")
             if not image_b64:
                 raise RuntimeError("Cloudflare returned no image data.")
@@ -481,15 +497,19 @@ watermarks, UI, brand marks, human protagonist, horror or violence.
                 raise RuntimeError("Generated image is empty.")
             return Path(filename)
         except (requests.Timeout, requests.ConnectionError) as exc:
-            if attempt == 3:
+            if attempt == 4:
                 raise RuntimeError("Cloudflare connection failed after retries.") from exc
-            time.sleep(10 * (attempt + 1))
+            wait = min(90, 15 * (attempt + 1))
+            print(f"Cloudflare network error. Waiting {wait}s...")
+            time.sleep(wait)
         finally:
             for h in handles:
                 try:
                     h.close()
                 except Exception:
                     pass
+
+    raise RuntimeError("Cloudflare image generation failed after all retries.")
 
 
 def generate_character_reference(story):
@@ -512,7 +532,157 @@ face, colors, clothes, body proportions and distinctive feature over scenery.
 # ============================================================
 
 async def _save_tts(text, output):
-    c
+    import edge_tts
+    await edge_tts.Communicate(text, "hi-IN-SwaraNeural", rate=TTS_RATE, pitch=TTS_PITCH).save(str(output))
+
+
+def tts(story):
+    voices = []
+    for i, scene in enumerate(story["scenes"], 1):
+        text = scene["narration"] + (f" {story['moral']}" if i == SCENE_COUNT else "")
+        out = WORK / f"voice_{i:02d}.mp3"
+        asyncio.run(_save_tts(text, out))
+        if not out.exists() or out.stat().st_size == 0:
+            raise RuntimeError(f"Voice not created: {out}")
+        voices.append(out)
+    print("Voice settings:", TTS_RATE, TTS_PITCH)
+    return voices
+
+# ============================================================
+# FFMPEG + AUDIO
+# ============================================================
+
+def ffprobe_duration(path):
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path)
+    ], capture_output=True, text=True, check=True)
+    return float(result.stdout.strip())
+
+
+def run_command(command):
+    print("Running:", " ".join(str(x) for x in command))
+    subprocess.run(command, check=True)
+
+
+def esc(text):
+    return str(text).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'").replace("%", "\\%").replace("\n", " ")
+
+
+def make_tone(path, kind, duration=0.28):
+    rate = 44100
+    n = max(1, int(rate * duration))
+    presets = {
+        "pop": (650, 1050), "whoosh": (180, 1050), "sparkle": (900, 1500),
+        "boing": (340, 150), "giggle": (720, 1150), "none": (700, 700)
+    }
+    start, end = presets.get(kind, (700, 700))
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(rate)
+        frames = bytearray()
+        for i in range(n):
+            t = i / rate
+            p = i / max(1, n - 1)
+            freq = start + (end - start) * p
+            env = min(1.0, i / (rate * 0.015)) * min(1.0, (n - i) / (rate * 0.07))
+            value = (math.sin(2 * math.pi * freq * t) + 0.3 * math.sin(2 * math.pi * freq * 1.7 * t)) * 0.14 * env
+            frames.extend(int(value * 32767).to_bytes(2, "little", signed=True))
+        wf.writeframes(frames)
+    return path
+
+
+def make_music(path, duration):
+    rate = 44100
+    notes = [523.25, 659.25, 783.99, 880.0, 783.99, 659.25, 587.33, 698.46]
+    beat = 0.24
+    total = int(rate * duration)
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(rate)
+        frames = bytearray()
+        for i in range(total):
+            t = i / rate
+            idx = int(t / beat) % len(notes)
+            local = t % beat
+            env = min(1.0, local / 0.025) * min(1.0, (beat - local) / 0.04)
+            f = notes[idx]
+            sample = (0.038 * math.sin(2 * math.pi * f * t) + 0.014 * math.sin(2 * math.pi * 2 * f * t)) * env
+            frames.extend(int(sample * 32767).to_bytes(2, "little", signed=True))
+        wf.writeframes(frames)
+    return path
+
+# ============================================================
+# VIDEO BUILD
+# ============================================================
+
+def build_video(story, voice_files):
+    # --------------------------------------------------------
+    # 1) Create ONE visual identity reference for the hero.
+    # --------------------------------------------------------
+    character_ref = generate_character_reference(story)
+    print("Character reference created:", character_ref)
+
+    # --------------------------------------------------------
+    # 2) Generate ONE connected image per scene.
+    #    Scene N uses the locked character + Scene N-1 reference.
+    # --------------------------------------------------------
+    images = []
+    previous_scene = None
+    for i, scene in enumerate(story["scenes"], 1):
+        path = WORK / f"scene_{i:02d}.png"
+        continuity_ref = f"\nPREVIOUS SCENE CONTINUITY: {scene.get('continuity','')}"
+        prompt = (
+            f"CHARACTER BIBLE (LOCKED): {story['character_bible']}\n"
+            f"SCENE {i}: {scene['narration']}\n"
+            f"ACTION: {scene['action']}\n"
+            f"EMOTION: {scene['emotion']}\n"
+            f"CAMERA: {scene['camera']}\n"
+            f"VISIBLE EVENT: {scene['visual_event']}\n"
+            f"CONTINUITY: {scene.get('continuity','')}\n"
+            f"DETAILED IMAGE DIRECTION: {scene['image_prompt']}\n"
+            f"{continuity_ref}\n"
+            "Show the SAME hero from the character reference. If a previous scene reference is supplied, "
+            "continue its environment/object design while changing only what this scene's narration requires."
+        )
+        refs = [character_ref]
+        if previous_scene is not None:
+            refs.append(previous_scene)
+        print(f"Generating connected scene {i}/{SCENE_COUNT} with {len(refs)} visual references")
+        generate_image(prompt, path, reference_paths=refs, width=1024, height=1792)
+        images.append(path)
+        previous_scene = path
+
+    # --------------------------------------------------------
+    # 3) Natural scene timing from scene-by-scene narration.
+    # --------------------------------------------------------
+    raw_durations = [max(2.7, ffprobe_duration(v)) for v in voice_files]
+    total_voice = sum(raw_durations)
+    print("Raw total voice duration:", round(total_voice, 2))
+
+    speed = 1.0
+    if total_voice > 58.0:
+        speed = min(1.14, total_voice / 58.0)
+    if total_voice > 66.0:
+        speed = min(1.18, total_voice / 58.0)
+
+    scene_audio = []
+    scene_durations = []
+    for i, (voice, raw) in enumerate(zip(voice_files, raw_durations), 1):
+        audio = voice
+        if speed != 1.0:
+            adjusted = WORK / f"voice_adj_{i:02d}.m4a"
+            atempo = speed
+            filters = []
+            while atempo > 2.0:
+                filters.append("atempo=2.0")
+                atempo /= 2.0
+            filters.append(f"atempo={atempo:.5f}")
+            run_command(["ffmpeg", "-y", "-i", str(voice), "-filter:a", ",".join(filters), "-c:a", "aac", "-b:a", "128k", str(adjusted)])
+            audio = adjusted
+        scene_audio.append(audio)
+        scene_durations.append(ffprobe_duration(audio))
+
+    clips = []
+    audio_parts = []
     for i, (img, scene, duration, voice) in enumerate(zip(images, story["scenes"], scene_durations, scene_audio), 1):
         clip = WORK / f"clip_{i:02d}.mp4"
         frames = max(1, int(duration * 30))
@@ -621,7 +791,7 @@ def upload_youtube():
 
 def main():
     print("=" * 60)
-    print("TOON KIDS AUTOMATION V6 STARTED")
+    print("TOON KIDS AUTOMATION V7 STARTED")
     print("=" * 60)
     for key in ["GEMINI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"]:
         if not os.environ.get(key):
@@ -653,14 +823,12 @@ def main():
         "story_text": compact_story_text(story, topic),
         "character_bible": story["character_bible"], "moral": story["moral"]
     }
-    history.append(entry)
-    save_history(history)
 
     META.write_text(json.dumps({
         "title": story["title"], "hook": story["hook"], "moral": story["moral"],
         "topic": topic, "scenes": SCENE_COUNT, "visual_beats_per_scene": 1,
         "reference_image_continuity": True,
-        "target_duration": "50-58 seconds", "version": "V6"
+        "target_duration": "50-58 seconds", "version": "V7"
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     voices = tts(story)
@@ -671,8 +839,13 @@ def main():
     else:
         print("YouTube upload disabled.")
 
+    # Only accepted after the video pipeline has completed successfully.
+    history.append(entry)
+    save_history(history)
+    print("Accepted story added to permanent history:", story["title"])
+
     print("=" * 60)
-    print("TOON KIDS AUTOMATION V6 COMPLETED")
+    print("TOON KIDS AUTOMATION V7 COMPLETED")
     print("=" * 60)
 
 
