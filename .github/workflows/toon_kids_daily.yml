@@ -26,12 +26,16 @@ jobs:
     env:
 
       # =====================================================
-      # GEMINI - STORY GENERATION ONLY
+      # GEMINI - STORY GENERATION
       # =====================================================
 
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
+      # Primary model
       GEMINI_TEXT_MODEL: gemini-3.6-flash
+
+      # Stable fallback used automatically by Python code
+      GEMINI_FALLBACK_MODEL: gemini-3.5-flash-lite
 
 
       # =====================================================
@@ -55,11 +59,11 @@ jobs:
 
 
       # =====================================================
-      # OTHER SETTINGS
+      # TTS - ENERGETIC KIDS VOICE
       # =====================================================
 
-      TTS_RATE: "+15%"
-      TTS_PITCH: "+2Hz"
+      TTS_RATE: "+18%"
+      TTS_PITCH: "+4Hz"
 
       UPLOAD_YOUTUBE: "true"
 
@@ -84,6 +88,9 @@ jobs:
 
         uses: actions/checkout@v4
 
+        with:
+          fetch-depth: 0
+
 
       # =====================================================
       # PYTHON
@@ -98,7 +105,7 @@ jobs:
 
 
       # =====================================================
-      # FFMPEG
+      # FFMPEG + FONTS
       # =====================================================
 
       - name: Install FFmpeg
@@ -107,7 +114,10 @@ jobs:
 
           sudo apt-get update
 
-          sudo apt-get install -y ffmpeg fonts-noto-core
+          sudo apt-get install -y \
+            ffmpeg \
+            fonts-noto-core \
+            fonts-noto-extra
 
 
       # =====================================================
@@ -176,7 +186,7 @@ jobs:
 
 
       # =====================================================
-      # SHOW CONFIG
+      # SHOW CONFIGURATION
       # =====================================================
 
       - name: Show configuration
@@ -184,29 +194,45 @@ jobs:
         run: |
 
           echo "=========================================="
-
-          echo "TOON KIDS CONFIGURATION"
-
+          echo "TOON KIDS V3 CONFIGURATION"
           echo "=========================================="
 
           echo "Python:"
           python --version
 
+          echo ""
           echo "FFmpeg:"
           ffmpeg -version | head -n 1
 
-          echo "Gemini text model:"
+          echo ""
+          echo "Gemini primary:"
           echo "$GEMINI_TEXT_MODEL"
 
+          echo ""
+          echo "Gemini fallback:"
+          echo "$GEMINI_FALLBACK_MODEL"
+
+          echo ""
           echo "Cloudflare image model:"
           echo "@cf/black-forest-labs/flux-1-schnell"
 
+          echo ""
+          echo "TTS rate:"
+          echo "$TTS_RATE"
+
+          echo ""
+          echo "TTS pitch:"
+          echo "$TTS_PITCH"
+
+          echo ""
           echo "Run slot:"
           echo "$RUN_SLOT"
 
+          echo ""
           echo "Upload to YouTube:"
           echo "$UPLOAD_YOUTUBE"
 
+          echo ""
           echo "=========================================="
 
 
@@ -218,7 +244,9 @@ jobs:
 
         run: |
 
-          echo "Starting Toon Kids generation..."
+          echo "=========================================="
+          echo "STARTING TOON KIDS V3"
+          echo "=========================================="
 
           python src/toon_kids_story.py
 
