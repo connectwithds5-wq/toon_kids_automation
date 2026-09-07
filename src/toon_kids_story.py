@@ -17,9 +17,8 @@ import requests
 from google import genai
 from google.genai import types
 
-
 # ============================================================
-# PATHS
+# TOON KIDS V5 — ENGAGING STORY ENGINE
 # ============================================================
 
 BASE = Path(__file__).resolve().parent.parent
@@ -29,115 +28,99 @@ HISTORY = BASE / "story_history.json"
 WORK = BASE / "work"
 WORK.mkdir(exist_ok=True)
 
-
-# ============================================================
-# SETTINGS
-# ============================================================
-
 TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.6-flash")
 FALLBACK_TEXT_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
 CLOUDFLARE_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+TTS_RATE = os.getenv("TTS_RATE", "+18%")
+TTS_PITCH = os.getenv("TTS_PITCH", "+4Hz")
 RUN_SLOT = os.getenv("RUN_SLOT", "manual")
-
-TTS_RATE = os.getenv("TTS_RATE", "+20%")
-TTS_PITCH = os.getenv("TTS_PITCH", "+5Hz")
-
 SCENE_COUNT = 10
 MAX_DUPLICATE_RETRIES = 8
 TARGET_MIN_SECONDS = 48
 TARGET_MAX_SECONDS = 60
 
-
 # ============================================================
-# UNLIMITED RANDOM STORY DNA
+# STORY DNA
 # ============================================================
 
 CHARACTERS = [
-    "नन्हा खरगोश", "शरारती बंदर", "प्यारा हाथी", "चतुर गिलहरी",
-    "नन्हा पिल्ला", "रंगीन तोता", "छोटी बिल्ली", "बहादुर चूहा",
-    "नन्हा हिरन", "मजेदार भालू", "चंचल लोमड़ी", "छोटी चिड़िया",
-    "नन्हा रोबोट", "दयालु कछुआ", "मुस्कुराती तितली", "नन्हा पेंगुइन",
-    "जिज्ञासु बकरी", "छोटा ड्रैगन", "नटखट गिलहरी", "नन्ही मछली",
-    "प्यारा पांडा", "छोटा जिराफ", "नन्हा घोड़ा", "मजेदार मेंढक",
-    "छोटी मधुमक्खी", "नन्हा उल्लू", "चंचल बंदरिया", "प्यारा भेड़ का बच्चा",
-    "नन्हा समुद्री घोड़ा", "छोटा कंगारू"
+    "खरगोश", "बंदर", "हाथी", "गिलहरी", "पिल्ला", "तोता", "बिल्ली",
+    "चूहा", "हिरन", "भालू", "लोमड़ी", "चिड़िया", "रोबोट", "कछुआ",
+    "तितली", "पेंगुइन", "बकरी", "ड्रैगन", "मछली", "पांडा", "जिराफ",
+    "घोड़ा", "मेंढक", "मधुमक्खी", "उल्लू", "भेड़ का बच्चा", "कंगारू"
+]
+
+COLORS = [
+    "गोल्डन पीला", "आसमान नीला", "कोरल नारंगी", "पुदीना हरा",
+    "लैवेंडर बैंगनी", "चटख लाल", "नीला-हरा", "गुलाबी", "चॉकलेट भूरा"
+]
+
+OUTFITS = [
+    "पीली हुडी और लाल स्नीकर्स",
+    "नीली जैकेट और पीले जूते",
+    "हरा छोटा बैकपैक और नारंगी कैप",
+    "लाल स्वेटर और नीली छोटी टोपी",
+    "बैंगनी ओवरऑल और सफेद जूते",
+    "नारंगी जैकेट और हरे स्नीकर्स"
 ]
 
 PLACES = [
-    "जादुई जंगल", "रंगीन गाँव", "चमकता हुआ बगीचा", "बादलों का शहर",
+    "जादुई जंगल", "रंगीन गाँव", "चमकता बगीचा", "बादलों का शहर",
     "समुद्र किनारा", "इंद्रधनुषी पहाड़", "रहस्यमयी तालाब", "खिलौनों का शहर",
-    "चाँदनी वाला जंगल", "फूलों की घाटी", "सितारों की दुनिया", "मजेदार स्कूल",
-    "जादुई बाजार", "बारिश वाला जंगल", "बर्फीली पहाड़ी", "गुब्बारों की दुनिया",
-    "सतरंगी नदी", "छोटा सा खेत", "सूरजमुखी का बगीचा", "चॉकलेट की दुनिया",
-    "बादलों के ऊपर का गाँव", "समुद्र के नीचे की दुनिया", "रंग-बिरंगी कैंडी की घाटी",
-    "चमकते फूलों का जंगल", "जादुई रेलवे स्टेशन", "पतंगों का शहर",
-    "संगीत वाला जंगल", "खिलखिलाते बादलों की घाटी", "रोबोटों का छोटा शहर",
-    "चाँद के पास का बगीचा"
+    "फूलों की घाटी", "सितारों की दुनिया", "मजेदार स्कूल", "जादुई बाजार",
+    "बारिश वाला जंगल", "बर्फीली पहाड़ी", "गुब्बारों की दुनिया", "सतरंगी नदी",
+    "सूरजमुखी का बगीचा", "चॉकलेट की दुनिया", "जादुई रेलवे स्टेशन",
+    "पतंगों का शहर", "संगीत वाला जंगल", "रोबोटों का छोटा शहर"
 ]
 
 OBJECTS = [
     "चमकती चाबी", "रहस्यमयी डिब्बा", "उड़ने वाली पतंग", "जादुई घंटी",
-    "सुनहरी गेंद", "रंग बदलने वाला छाता", "छोटी जादुई किताब", "चमकता सितारा",
-    "बोलने वाला खिलौना", "अनोखी बोतल", "सतरंगी पंख", "गायब होने वाली टोपी",
-    "जादुई घड़ी", "चमकता सिक्का", "छोटा खजाना", "उड़ता गुब्बारा",
-    "रहस्यमयी नक्शा", "मुस्कुराता हुआ पौधा", "जादुई सीटी", "चॉकलेट का पेड़",
-    "चमकदार पत्थर", "रंग बदलने वाला फूल", "बोलने वाला बैग", "उड़ने वाली किताब",
-    "जादुई जूते", "सतरंगी छड़ी", "छोटा संगीत बॉक्स", "गायब होने वाला खिलौना",
-    "चमकती हुई सीप", "जादुई पेंसिल"
+    "सुनहरी गेंद", "रंग बदलने वाला छाता", "जादुई किताब", "चमकता सितारा",
+    "बोलने वाला खिलौना", "सतरंगी पंख", "गायब होने वाली टोपी", "जादुई घड़ी",
+    "चमकता सिक्का", "रहस्यमयी नक्शा", "मुस्कुराता पौधा", "जादुई सीटी",
+    "चॉकलेट का पेड़", "चमकदार पत्थर", "रंग बदलने वाला फूल", "उड़ने वाली किताब",
+    "जादुई जूते", "सतरंगी छड़ी", "संगीत बॉक्स", "गायब होने वाला खिलौना",
+    "चमकती सीप", "जादुई पेंसिल"
 ]
 
 PROBLEMS = [
     "वह चीज़ अचानक गायब हो जाती है",
     "रास्ता तीन मजेदार दिशाओं में बंट जाता है",
-    "दोस्त की मदद के लिए समय बहुत कम है",
+    "एक दोस्त को बहुत जल्दी मदद चाहिए",
     "जादुई चीज़ सही रंग पहचान नहीं पा रही",
     "एक आवाज़ बार-बार गलत जगह से आती है",
     "छोटी चीज़ बहुत बड़ी परेशानी बना देती है",
     "सबको लगता है कि राज कुछ और है",
-    "अचानक मौसम बदल जाता है",
-    "एक पहेली का जवाब उल्टा काम करता है",
+    "अचानक तेज़ बारिश शुरू हो जाती है",
+    "पहेली का जवाब उल्टा काम करता है",
     "मदद करने वाला दोस्त खुद फँस जाता है",
     "सही रास्ता केवल हँसने पर दिखाई देता है",
-    "एक जरूरी चीज़ का आखिरी टुकड़ा नहीं मिलता",
-    "एक सरप्राइज गलती से शुरू हो जाता है",
-    "सब कुछ ठीक लगता है, लेकिन एक चीज़ अजीब है",
-    "नायक को अपने डर के बावजूद आगे बढ़ना पड़ता है",
-    "एक मजेदार रेस में नियम बदल जाते हैं",
+    "जरूरी चीज़ का आखिरी टुकड़ा नहीं मिलता",
+    "सरप्राइज गलती से शुरू हो जाता है",
+    "सब ठीक लगता है, लेकिन एक चीज़ अजीब है",
+    "नायक को डर के बावजूद आगे बढ़ना पड़ता है",
+    "मजेदार रेस में नियम बदल जाते हैं",
     "खजाना सामने होते हुए भी दिखाई नहीं देता",
-    "दो दोस्त एक ही सुराग को अलग समझते हैं",
-    "एक छोटा जानवर अनजाने में बड़ा रहस्य खोल देता है",
-    "समाधान उतना मुश्किल नहीं जितना सब सोचते हैं"
+    "दो दोस्त एक ही सुराग को अलग समझते हैं"
 ]
 
 TWISTS = [
-    "वस्तु खुद रास्ता दिखाती है", "असल रहस्य एक प्यारा दोस्त छुपा रहा था",
-    "जो डरावना लगा वह मजेदार निकला", "सुराग बिल्कुल पास ही था",
-    "गलती ही सही समाधान बन जाती है", "सब मिलकर काम करते हैं तो जादू शुरू होता है",
-    "वस्तु का राज केवल हँसी से खुलता है", "नायक को मदद माँगना ही सही जवाब मिलता है",
-    "छोटा सा काम बड़ा सरप्राइज बन जाता है", "आखिर में पता चलता है कि कोई खोया ही नहीं था",
-    "एक दोस्त पहले से पूरा प्लान बना चुका था", "मoral सीख कहानी के मजेदार पल से निकलती है",
-    "जिसे समस्या समझा गया वही असली मददगार था", "अंत में सबको मिलकर एक नया दोस्त मिलता है",
+    "वस्तु खुद सही रास्ता दिखाती है",
+    "असल सुराग बिल्कुल पास छुपा था",
+    "जो डरावना लगा वह बहुत मजेदार निकला",
+    "गलती ही सही समाधान बन जाती है",
+    "हँसी से जादू चालू हो जाता है",
+    "मदद माँगना ही सही जवाब साबित होता है",
+    "छोटा सा काम बड़ा सरप्राइज बन जाता है",
+    "समस्या समझा गया दोस्त असल में मददगार था",
+    "अंत में सबको मिलकर एक नया दोस्त मिलता है",
     "राज खुलते ही पूरा माहौल खुशी से भर जाता है"
 ]
 
-ACTIONS = [
-    "एक खोई चीज़ खोजने निकलता है", "अपने दोस्त की मदद करता है",
-    "एक मजेदार पहेली हल करता है", "सबको एक साथ इकट्ठा करता है",
-    "एक छोटी गलती को ठीक करता है", "एक अनोखी प्रतियोगिता में भाग लेता है",
-    "एक रहस्यमयी रास्ते पर जाता है", "बारिश से पहले एक काम पूरा करता है",
-    "एक नए दोस्त से मिलता है", "एक छोटी मुसीबत का मजेदार हल निकालता है",
-    "एक सरप्राइज पार्टी बचाता है", "एक खोया हुआ खजाना ढूँढता है",
-    "एक अजीब आवाज़ का राज पता करता है", "सबको हँसाने वाला खेल शुरू करता है",
-    "एक जादुई चीज़ को सही जगह पहुँचाता है", "अपने डर पर काबू पाता है",
-    "एक दोस्त के लिए सरप्राइज तैयार करता है", "एक रहस्यमयी दरवाजा खोलता है",
-    "एक मजेदार रेस में शामिल होता है", "एक खोई हुई दोस्ती वापस लाता है",
-    "एक बड़ी समस्या का छोटा सा हल ढूँढता है", "एक अजीब सपने का मतलब पता करता है",
-    "सबके साथ मिलकर एक शानदार काम करता है", "एक अनोखे मेले में पहुँच जाता है",
-    "एक रहस्यमयी आवाज़ का पीछा करता है"
-]
+SFX = ["pop", "whoosh", "sparkle", "boing", "giggle", "none"]
 
 # ============================================================
-# HELPERS + PERMANENT HISTORY
+# HELPERS / HISTORY
 # ============================================================
 
 def norm(value):
@@ -159,40 +142,27 @@ def load_history():
 
 
 def save_history(history):
-    # IMPORTANT: no [-1000:] cap. History is intentionally permanent.
-    HISTORY.write_text(
-        json.dumps(history, ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
+    # Permanent history. NEVER truncate.
+    HISTORY.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def story_fingerprint(story, topic):
-    scenes = story.get("scenes", [])
     raw = " | ".join([
-        story.get("title", ""),
-        topic,
-        story.get("moral", ""),
-        " ".join(s.get("narration", "") for s in scenes)
+        story.get("title", ""), topic, story.get("moral", ""),
+        " ".join(s.get("narration", "") for s in story.get("scenes", []))
     ])
     return hashlib.sha256(norm(raw).encode("utf-8")).hexdigest()
 
 
 def compact_story_text(story, topic):
-    parts = [
-        story.get("title", ""),
-        topic,
-        story.get("moral", ""),
-        story.get("character_bible", "")
-    ]
+    parts = [story.get("title", ""), topic, story.get("moral", "")]
     for scene in story.get("scenes", []):
-        parts.append(scene.get("narration", ""))
-        parts.append(scene.get("image_prompt", ""))
+        parts += [scene.get("narration", ""), scene.get("action", ""), scene.get("visual_event", "")]
     return " ".join(parts)
 
 
 def similarity(a, b):
-    ta = tokens(a)
-    tb = tokens(b)
+    ta, tb = tokens(a), tokens(b)
     if not ta or not tb:
         return 0.0
     jaccard = len(ta & tb) / max(1, len(ta | tb))
@@ -203,166 +173,157 @@ def similarity(a, b):
 def is_duplicate_story(story, topic, history):
     fp = story_fingerprint(story, topic)
     current = compact_story_text(story, topic)
-
+    title = story.get("title", "")
     for item in history:
         if isinstance(item, str):
-            old_text = item
-            old_fp = ""
+            old_fp, old_text, old_title = "", item, ""
         else:
             old_fp = item.get("fingerprint", "")
-            old_text = item.get("story_text") or item.get("topic") or item.get("title", "")
-
+            old_text = item.get("story_text") or item.get("topic", "")
+            old_title = item.get("title", "")
         if old_fp and old_fp == fp:
-            return True, "exact fingerprint match"
-
-        # Fast title protection.
-        title = story.get("title", "")
-        old_title = item.get("title", "") if isinstance(item, dict) else ""
+            return True, "exact fingerprint"
         if title and old_title and similarity(title, old_title) >= 0.82:
-            return True, f"very similar title: {old_title}"
-
-        # Semantic-ish local protection. No extra API call and no quota cost.
+            return True, "similar title"
         if old_text and similarity(current, old_text) >= 0.76:
             return True, "high story similarity"
-
     return False, ""
 
 
 def choose_topic(history):
-    used_topics = {
-        norm(item if isinstance(item, str) else item.get("topic", ""))
-        for item in history
-    }
-
-    for _ in range(250):
+    used = {norm(x if isinstance(x, str) else x.get("topic", "")) for x in history}
+    for _ in range(300):
         character = secrets.choice(CHARACTERS)
         place = secrets.choice(PLACES)
         obj = secrets.choice(OBJECTS)
-        action = secrets.choice(ACTIONS)
         problem = secrets.choice(PROBLEMS)
         twist = secrets.choice(TWISTS)
-
-        topic = (
-            f"{character} का नया रोमांच: {place} में {obj}, "
-            f"जहाँ वह {action}, लेकिन {problem}; आखिर में {twist}।"
-        )
-
-        if norm(topic) not in used_topics:
+        topic = f"{character} का रोमांच: {place} में {obj}; समस्या: {problem}; ट्विस्ट: {twist}।"
+        if norm(topic) not in used:
             return topic
+    return f"एक बिल्कुल नया बच्चों का एडवेंचर {secrets.token_hex(12)}"
 
-    # This is only a per-video candidate fallback, NOT a story-count limit.
+
+def make_locked_character():
+    species = secrets.choice(CHARACTERS)
+    color = secrets.choice(COLORS)
+    outfit = secrets.choice(OUTFITS)
+    eye = secrets.choice(["बड़ी चमकीली भूरी आँखें", "बड़ी चमकीली हरी आँखें", "बड़ी चमकीली नीली आँखें"])
+    feature = secrets.choice([
+        "बायाँ कान थोड़ा मुड़ा हुआ", "गाल पर छोटा दिल जैसा निशान",
+        "गले में छोटी घंटी", "नाक पर दो प्यारे छोटे डॉट्स",
+        "एक छोटा स्टार बैज"
+    ])
     return (
-        f"{secrets.choice(CHARACTERS)} का बिल्कुल नया एडवेंचर "
-        f"{secrets.token_hex(10)}"
+        f"मुख्य नायक: छोटा प्यारा {species}; {color} रंग; गोल मुलायम शरीर; "
+        f"{eye}; {outfit}; {feature}; हमेशा यही चेहरा, यही रंग, यही कपड़े, "
+        f"यही शरीर और यही पहचान। कोई इंसान मुख्य नायक नहीं है।"
     )
 
-
 # ============================================================
-# GEMINI
+# GEMINI STORY
 # ============================================================
 
 def is_retryable_gemini(exc):
     text = str(exc).upper()
-    return any(x in text for x in [
-        "503", "UNAVAILABLE", "HIGH DEMAND", "429",
-        "RESOURCE_EXHAUSTED", "QUOTA EXCEEDED",
-        "RATE LIMIT", "INTERNAL"
-    ])
+    return any(x in text for x in ["503", "UNAVAILABLE", "HIGH DEMAND", "429", "RESOURCE_EXHAUSTED", "QUOTA", "RATE LIMIT", "INTERNAL"])
 
 
 def generate_story(topic, history):
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is missing.")
-
     client = genai.Client(api_key=api_key)
+    locked = make_locked_character()
 
-    previous_hint = ""
-    if history:
-        # Keep prompt small: recent accepted titles/topics are enough to steer novelty.
-        recent = history[-25:]
-        rows = []
-        for item in recent:
-            if isinstance(item, str):
-                rows.append(item)
-            else:
-                rows.append(item.get("title", "") + " — " + item.get("topic", ""))
-        previous_hint = "\n".join(rows)
+    recent = history[-30:]
+    avoid = "\n".join(
+        (x if isinstance(x, str) else f"{x.get('title','')} — {x.get('topic','')}")
+        for x in recent
+    )
 
     prompt = f"""
-Create ONE ORIGINAL Hindi kids story for Toon Kids YouTube Shorts.
+Create ONE ORIGINAL Hindi kids YouTube Short story.
 
 RANDOM STORY DNA:
 {topic}
 
-TARGET:
-Children ages 4-10.
-Natural spoken Hindi. Fun, energetic, simple vocabulary.
-Target 48-60 seconds.
-TOTAL NARRATION: about 120-135 Hindi words including the moral.
-Keep each scene narration extremely short so the finished voice normally stays under 60 seconds.
+LOCKED MAIN CHARACTER — MUST NEVER CHANGE:
+{locked}
 
-IMPORTANT NOVELTY RULE:
-Never copy or closely imitate an earlier story.
-Change the situation, actions, discoveries, jokes and payoff.
-Do not make a story that is merely the same plot with a different animal.
-Earlier accepted titles/topics for avoidance:
-{previous_hint}
+AUDIENCE: children ages 4-10.
+LANGUAGE: natural spoken Hindi, simple words, playful, energetic.
+TARGET LENGTH: 50-58 seconds. TOTAL narration including moral: 115-130 Hindi words.
 
-EXACTLY {SCENE_COUNT} SCENES.
+IMPORTANT: This must feel like a tiny animated movie, NOT a slideshow.
+The story must have a clear goal, escalating problem, funny surprise, physical action,
+and a satisfying visual payoff.
+
+EXACTLY {SCENE_COUNT} scenes.
+
+SCENE TIMING:
+- Scene 1 hook: 2.5-4 sec, immediately surprising.
+- Scenes 2-8: about 4.5-5.5 sec each.
+- Scene 9 reveal: 4-5 sec.
+- Scene 10 payoff + moral: 4-5 sec.
 
 Every scene MUST contain:
-- narration: 1-2 very short spoken Hindi sentences
-- text: maximum 6 Hindi words
-- action: a visible physical action or discovery
-- emotion: clear facial/body emotion
-- camera: a specific dynamic camera direction
-- image_prompt: detailed visual prompt for the FIRST visual beat
-- image_prompt_2: detailed visual prompt for the SECOND visual beat, showing a clear change in action/composition
-- visual_change: describe exactly what changes between the two visual beats
-- sfx: one of "pop", "whoosh", "sparkle", "boing", "giggle", "none"
+- narration: short spoken Hindi
+- text: max 5 Hindi words
+- action: one concrete physical action
+- emotion: face/body emotion
+- camera: dynamic shot direction
+- visual_event: a concrete visible event that changes the situation
+- image_prompt: first frame prompt
+- image_prompt_2: second frame prompt
+- sfx: one of {SFX}
 
-VISUAL PACING:
-Every scene must visibly change something.
-NO static portrait scenes.
-Each scene has TWO distinct visual beats. Beat 1 establishes an action; Beat 2 shows the action progressing, reacting, revealing, or resolving.
-The second visual beat must NOT be the same pose or composition as the first.
-Use running, jumping, opening, chasing, hiding, discovering, reacting,
-falling safely, spinning, pointing, laughing, helping, flying, splashing,
-or another clear child-friendly action.
-Use varied camera: close-up, wide, low-angle, overhead, tracking,
-push-in, pull-back, orbit, reveal.
-Each scene should feel like a new beat of a real animated short.
+STORY PACING:
+1. Start IN THE MIDDLE of something surprising. No greetings.
+2. Introduce the hero in one sentence.
+3. Give the hero a simple goal.
+4. Make the problem visibly worse.
+5. Add a funny reaction or mistake.
+6. Add a fast challenge/chase/discovery.
+7. Hero tries a clever solution.
+8. Solution almost fails, then a clue appears.
+9. BIG VISUAL REVEAL / payoff.
+10. Happy ending + one short memorable moral.
 
-STORY BEATS:
-1. 1-2 second curiosity hook.
-2. Fast character introduction.
-3. Problem appears.
-4. First surprising clue.
-5. Funny reaction.
-6. Escalation / chase / challenge.
-7. Clever attempt.
-8. Almost-solution with twist.
-9. Big satisfying reveal.
-10. Happy payoff + memorable simple moral.
+ENGAGEMENT RULES:
+- Every scene must change the situation.
+- Never spend a scene just explaining.
+- Use curiosity questions, surprises, funny reactions and physical actions.
+- No repetitive searching scenes.
+- No generic "he was happy" filler.
+- The hero must DO something in every scene.
+- The final reveal must pay off an earlier clue.
 
-CHARACTER CONSISTENCY:
-Create a concise character_bible specifying species, age/look, body,
-face, eyes, fur/skin, clothes, accessories, distinctive feature.
-Repeat the important appearance details inside every image_prompt.
+CHARACTER LOCK RULES:
+- ONLY ONE MAIN CHARACTER: the locked character above.
+- Do NOT invent boys, girls, humans, or a different hero.
+- Supporting animals are allowed only briefly and must NOT replace the hero.
+- Every image prompt MUST repeat the locked character description exactly or nearly exactly.
+- The hero must be large, recognizable and clearly performing the action.
 
-IMAGE STYLE:
-cute premium 3D animated movie quality, colorful, expressive,
-warm cinematic lighting, soft rounded shapes, child-friendly,
-original characters only, vertical 9:16 composition.
-No copyrighted characters, logos, brands, watermark, written text,
-captions, subtitles or speech bubbles inside images.
+IMAGE PROMPTS:
+Each prompt must describe an ACTION, not a portrait.
+Beat 1 establishes the action; Beat 2 shows the action progressing or reacting.
+Use strong foreground/midground/background depth.
+Use different compositions: extreme close-up, wide, low-angle, overhead,
+tracking, orbit, push-in, reveal, top-down, reaction shot.
+Do not put written text in images.
+Do not show phones, UI, logos, brands, copyrighted characters, horror or violence.
+Do not create a human child as the main character.
 
-Return ONLY valid JSON:
+PREVIOUS STORIES TO AVOID:
+{avoid}
+
+Return ONLY valid JSON in this exact shape:
 {{
   "title": "...",
   "hook": "...",
-  "character_bible": "...",
+  "character_bible": "{locked}",
   "scenes": [
     {{
       "narration": "...",
@@ -370,9 +331,9 @@ Return ONLY valid JSON:
       "action": "...",
       "emotion": "...",
       "camera": "...",
+      "visual_event": "...",
       "image_prompt": "...",
       "image_prompt_2": "...",
-      "visual_change": "...",
       "sfx": "..."
     }}
   ],
@@ -380,252 +341,152 @@ Return ONLY valid JSON:
 }}
 """
 
-    models = []
-    for model in [TEXT_MODEL, FALLBACK_TEXT_MODEL]:
-        if model and model not in models:
-            models.append(model)
-
     last_exc = None
-
-    for model in models:
+    for model in [TEXT_MODEL, FALLBACK_TEXT_MODEL]:
+        if not model:
+            continue
         for attempt in range(3):
             try:
-                print(f"Gemini story model={model}, attempt={attempt + 1}/3")
+                print(f"Gemini model={model}, attempt={attempt+1}/3")
                 response = client.models.generate_content(
                     model=model,
                     contents=prompt,
                     config=types.GenerateContentConfig(
-                        temperature=1.15,
+                        temperature=1.18,
                         response_mime_type="application/json"
                     )
                 )
                 story = json.loads(response.text.strip())
                 scenes = story.get("scenes", [])
-
                 if len(scenes) != SCENE_COUNT:
-                    raise ValueError(
-                        f"Story must contain exactly {SCENE_COUNT} scenes."
-                    )
-
+                    raise ValueError(f"Story must contain exactly {SCENE_COUNT} scenes.")
                 for key in ["title", "hook", "character_bible", "moral"]:
                     if not story.get(key):
-                        raise ValueError(f"Story missing: {key}")
-
-                required_scene = [
-                    "narration", "text", "action", "emotion",
-                    "camera", "image_prompt", "image_prompt_2",
-                    "visual_change", "sfx"
-                ]
-                valid_sfx = {
-                    "pop", "whoosh", "sparkle", "boing", "giggle", "none"
-                }
-
+                        raise ValueError(f"Story missing {key}")
+                required = ["narration", "text", "action", "emotion", "camera", "visual_event", "image_prompt", "image_prompt_2", "sfx"]
                 for i, scene in enumerate(scenes, 1):
-                    for key in required_scene:
+                    for key in required:
                         if not scene.get(key):
-                            raise ValueError(f"Scene {i} missing {key}.")
-                    if scene["sfx"] not in valid_sfx:
+                            raise ValueError(f"Scene {i} missing {key}")
+                    if scene["sfx"] not in SFX:
                         scene["sfx"] = "none"
-
+                # Force the locked bible into the accepted story so prompts cannot drift.
+                story["character_bible"] = locked
                 return story
-
             except Exception as exc:
                 last_exc = exc
                 print("Gemini story error:", str(exc))
-                if not is_retryable_gemini(exc):
-                    # Validation errors should be retried on the same model.
-                    time.sleep(5 * (attempt + 1))
-                else:
-                    time.sleep(8 * (attempt + 1))
-
-                if attempt == 2:
-                    break
-
+                time.sleep((8 if is_retryable_gemini(exc) else 5) * (attempt + 1))
     raise RuntimeError(f"Gemini story generation failed: {last_exc}")
 
-
 # ============================================================
-# CLOUDFLARE IMAGE GENERATION
+# IMAGE GENERATION
 # ============================================================
 
 def generate_image(prompt, filename):
     account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
     api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
+    if not account_id or not api_token:
+        raise RuntimeError("Cloudflare credentials are missing.")
 
-    if not account_id:
-        raise RuntimeError("CLOUDFLARE_ACCOUNT_ID is missing.")
-    if not api_token:
-        raise RuntimeError("CLOUDFLARE_API_TOKEN is missing.")
-
-    url = (
-        "https://api.cloudflare.com/client/v4/"
-        f"accounts/{account_id}/ai/run/{CLOUDFLARE_IMAGE_MODEL}"
-    )
-
-    source_prompt = str(prompt).strip()
-    if len(source_prompt) > 1800:
-        source_prompt = source_prompt[:1800]
-
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{CLOUDFLARE_IMAGE_MODEL}"
+    source = str(prompt).strip()
+    if len(source) > 1750:
+        source = source[:1750]
     full_prompt = f"""
-Premium children's 3D animated story frame.
+Premium children's 3D animated movie frame, vertical 9:16.
 
-Cute high-quality 3D cartoon, colorful family animation,
-warm cinematic lighting, soft rounded shapes, friendly expressive face,
-bright cheerful environment, premium animated-film render.
+CHARACTER LOCK — THIS IS CRITICAL:
+{source}
 
-Keep the SAME main character design:
-same species, face, eye color, fur/skin color, clothes,
-accessories and body proportions.
+VISUAL STYLE:
+premium 3D family animation, colorful, warm cinematic lighting,
+soft rounded shapes, expressive face, polished render, strong depth,
+clear foreground/midground/background.
 
-Make the described ACTION obvious and physically readable.
-Strong pose and expression. Dynamic composition. Clear foreground,
-midground and background. Vertical 9:16. Leave safe space top/bottom.
+ACTION LOCK:
+Show the hero DOING the described physical action.
+No standing portrait. No passport-style pose. No generic smiling pose.
+The action must be instantly readable to a child.
 
-SCENE:
-{source_prompt}
+CONTINUITY:
+Same exact hero identity, same species, same color, same face,
+same eyes, same outfit, same accessories, same body proportions.
+No human main character. Do not replace the hero with another character.
 
-NO copyrighted characters. NO logos. NO watermark.
-NO written words. NO captions. NO subtitles. NO speech bubbles. NO UI.
+NO text, captions, subtitles, speech bubbles, logos, brands, watermark,
+UI, copyrighted characters, horror or violence.
 """.strip()
-
     if len(full_prompt) > 2000:
         full_prompt = full_prompt[:2000]
 
-    payload = {"prompt": full_prompt, "steps": 4}
-
     for attempt in range(4):
         try:
-            print(f"Cloudflare image attempt {attempt + 1}/4...")
             response = requests.post(
                 url,
-                headers={
-                    "Authorization": f"Bearer {api_token}",
-                    "Content-Type": "application/json"
-                },
-                json=payload,
+                headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"},
+                json={"prompt": full_prompt, "steps": 4},
                 timeout=180
             )
-
             if response.status_code == 429:
                 if attempt == 3:
-                    raise RuntimeError(
-                        "Cloudflare rate limit after all retries."
-                    )
+                    raise RuntimeError("Cloudflare rate limit after retries.")
                 time.sleep(15 * (attempt + 1))
                 continue
-
             if response.status_code >= 500:
                 if attempt == 3:
-                    raise RuntimeError(
-                        f"Cloudflare server error {response.status_code}."
-                    )
+                    raise RuntimeError(f"Cloudflare server error {response.status_code}.")
                 time.sleep(10 * (attempt + 1))
                 continue
-
             if response.status_code >= 400:
-                raise RuntimeError(
-                    f"Cloudflare image request failed: HTTP {response.status_code}: "
-                    f"{response.text[:1000]}"
-                )
-
-            try:
-                data = response.json()
-            except Exception as exc:
-                raise RuntimeError("Invalid Cloudflare API response.") from exc
-
+                raise RuntimeError(f"Cloudflare HTTP {response.status_code}: {response.text[:1000]}")
+            data = response.json()
             if not data.get("success"):
-                raise RuntimeError(
-                    "Cloudflare image generation failed: "
-                    + str(data.get("errors", []))
-                )
-
+                raise RuntimeError("Cloudflare image error: " + str(data.get("errors", [])))
             image_b64 = data.get("result", {}).get("image")
             if not image_b64:
                 raise RuntimeError("Cloudflare returned no image data.")
-
             if image_b64.startswith("data:image"):
                 image_b64 = image_b64.split(",", 1)[1]
-
-            image_bytes = base64.b64decode(image_b64)
-            output_path = Path(filename)
-            output_path.write_bytes(image_bytes)
-
-            if output_path.stat().st_size == 0:
-                raise RuntimeError("Generated image file is empty.")
-
-            print("Image saved:", output_path)
-            return output_path
-
-        except requests.Timeout as exc:
+            Path(filename).write_bytes(base64.b64decode(image_b64))
+            if Path(filename).stat().st_size == 0:
+                raise RuntimeError("Generated image is empty.")
+            return Path(filename)
+        except (requests.Timeout, requests.ConnectionError) as exc:
             if attempt == 3:
-                raise RuntimeError(
-                    "Cloudflare request timed out after all retries."
-                ) from exc
+                raise RuntimeError("Cloudflare connection failed after retries.") from exc
             time.sleep(10 * (attempt + 1))
-
-        except requests.ConnectionError as exc:
-            if attempt == 3:
-                raise RuntimeError(
-                    "Cloudflare connection failed."
-                ) from exc
-            time.sleep(10 * (attempt + 1))
-
 
 # ============================================================
-# HINDI TTS — ONE FILE PER SCENE
+# TTS
 # ============================================================
 
 async def _save_tts(text, output):
     import edge_tts
-    communicate = edge_tts.Communicate(
-        text,
-        "hi-IN-SwaraNeural",
-        rate=TTS_RATE,
-        pitch=TTS_PITCH
-    )
-    await communicate.save(str(output))
+    await edge_tts.Communicate(text, "hi-IN-SwaraNeural", rate=TTS_RATE, pitch=TTS_PITCH).save(str(output))
 
 
 def tts(story):
-    voice_files = []
-
-    for index, scene in enumerate(story["scenes"], 1):
-        text = scene["narration"]
-        if index == len(story["scenes"]):
-            text = f"{text} {story['moral']}"
-
-        output = WORK / f"voice_{index:02d}.mp3"
-        print(f"Generating Hindi voice {index}/{SCENE_COUNT}...")
-        asyncio.run(_save_tts(text, output))
-
-        if not output.exists() or output.stat().st_size == 0:
-            raise RuntimeError(f"Voice file was not created: {output}")
-
-        voice_files.append(output)
-
-    print(
-        "Voice settings:",
-        f"rate={TTS_RATE}, pitch={TTS_PITCH}"
-    )
-    return voice_files
-
+    voices = []
+    for i, scene in enumerate(story["scenes"], 1):
+        text = scene["narration"] + (f" {story['moral']}" if i == SCENE_COUNT else "")
+        out = WORK / f"voice_{i:02d}.mp3"
+        asyncio.run(_save_tts(text, out))
+        if not out.exists() or out.stat().st_size == 0:
+            raise RuntimeError(f"Voice not created: {out}")
+        voices.append(out)
+    print("Voice settings:", TTS_RATE, TTS_PITCH)
+    return voices
 
 # ============================================================
-# AUDIO / FFMPEG
+# FFMPEG + AUDIO
 # ============================================================
 
 def ffprobe_duration(path):
-    result = subprocess.run(
-        [
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            str(path)
-        ],
-        capture_output=True,
-        text=True,
-        check=True
-    )
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path)
+    ], capture_output=True, text=True, check=True)
     return float(result.stdout.strip())
 
 
@@ -635,387 +496,219 @@ def run_command(command):
 
 
 def esc(text):
-    return (
-        str(text)
-        .replace("\\", "\\\\")
-        .replace(":", "\\:")
-        .replace("'", "\\'")
-        .replace("%", "\\%")
-        .replace("\n", " ")
-    )
+    return str(text).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'").replace("%", "\\%").replace("\n", " ")
 
 
-def make_tone(path, kind, duration=0.32):
-    """Generate tiny original synthetic SFX without downloading assets."""
+def make_tone(path, kind, duration=0.28):
     rate = 44100
     n = max(1, int(rate * duration))
     presets = {
-        "pop": (620, 980),
-        "whoosh": (260, 900),
-        "sparkle": (880, 1320),
-        "boing": (320, 180),
-        "giggle": (700, 1100),
+        "pop": (650, 1050), "whoosh": (180, 1050), "sparkle": (900, 1500),
+        "boing": (340, 150), "giggle": (720, 1150), "none": (700, 700)
     }
     start, end = presets.get(kind, (700, 700))
-
     with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(rate)
-
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(rate)
         frames = bytearray()
         for i in range(n):
             t = i / rate
-            progress = i / max(1, n - 1)
-            freq = start + (end - start) * progress
-            env = min(1.0, i / (rate * 0.02))
-            env *= min(1.0, (n - i) / (rate * 0.08))
-            value = (
-                math.sin(2 * math.pi * freq * t)
-                + 0.35 * math.sin(2 * math.pi * freq * 1.7 * t)
-            ) * 0.16 * env
-            frames.extend(int(value * 32767).to_bytes(
-                2, "little", signed=True
-            ))
+            p = i / max(1, n - 1)
+            freq = start + (end - start) * p
+            env = min(1.0, i / (rate * 0.015)) * min(1.0, (n - i) / (rate * 0.07))
+            value = (math.sin(2 * math.pi * freq * t) + 0.3 * math.sin(2 * math.pi * freq * 1.7 * t)) * 0.14 * env
+            frames.extend(int(value * 32767).to_bytes(2, "little", signed=True))
         wf.writeframes(frames)
-
     return path
 
 
-def make_music(path, duration=70.0):
-    """Simple playful original melody; intentionally no external music asset."""
+def make_music(path, duration):
     rate = 44100
-    notes = [523.25, 659.25, 783.99, 659.25, 587.33, 698.46, 880.00, 698.46]
-    beat = 0.32
+    notes = [523.25, 659.25, 783.99, 880.0, 783.99, 659.25, 587.33, 698.46]
+    beat = 0.24
     total = int(rate * duration)
-
     with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(rate)
-
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(rate)
         frames = bytearray()
         for i in range(total):
             t = i / rate
             idx = int(t / beat) % len(notes)
             local = t % beat
-            freq = notes[idx]
-
-            # Soft two-layer melody with gentle pulse.
-            env = 0.5 + 0.5 * math.sin(2 * math.pi * local / beat)
-            sample = (
-                0.055 * math.sin(2 * math.pi * freq * t)
-                + 0.022 * math.sin(2 * math.pi * freq * 2 * t)
-            ) * env
-
-            frames.extend(int(sample * 32767).to_bytes(
-                2, "little", signed=True
-            ))
-
+            env = min(1.0, local / 0.025) * min(1.0, (beat - local) / 0.04)
+            f = notes[idx]
+            sample = (0.038 * math.sin(2 * math.pi * f * t) + 0.014 * math.sin(2 * math.pi * 2 * f * t)) * env
+            frames.extend(int(sample * 32767).to_bytes(2, "little", signed=True))
         wf.writeframes(frames)
-
     return path
 
-
 # ============================================================
-# BUILD VIDEO — 10 ACTION-DRIVEN SCENES
+# VIDEO BUILD
 # ============================================================
 
 def build_video(story, voice_files):
-    """Build a fast 10-scene short with TWO visual beats per scene."""
     images = []
-    bible = str(story["character_bible"])
-    if len(bible) > 780:
-        bible = bible[:780]
-
-    # --------------------------------------------------------
-    # Generate 20 visual keyframes: 2 genuinely different beats
-    # for every one of the 10 story scenes.
-    # --------------------------------------------------------
-    for index, scene in enumerate(story["scenes"], 1):
-        scene_images = []
+    bible = story["character_bible"]
+    for i, scene in enumerate(story["scenes"], 1):
+        scene_imgs = []
         for beat in (1, 2):
-            image_path = WORK / f"scene_{index:02d}_{beat}.png"
-            prompt_key = "image_prompt" if beat == 1 else "image_prompt_2"
-            image_prompt = (
-                "CHARACTER BIBLE:\n" + bible +
-                "\n\nACTION:\n" + str(scene.get("action", "")) +
-                "\n\nEMOTION:\n" + str(scene.get("emotion", "")) +
-                "\n\nCAMERA:\n" + str(scene.get("camera", "")) +
-                "\n\nVISUAL CHANGE:\n" + str(scene.get("visual_change", "")) +
-                f"\n\nBEAT {beat}:\n" + str(scene.get(prompt_key, scene.get("image_prompt", "")))
+            path = WORK / f"scene_{i:02d}_{beat}.png"
+            key = "image_prompt" if beat == 1 else "image_prompt_2"
+            prompt = (
+                f"{bible}\n\nACTION: {scene['action']}\n"
+                f"EMOTION: {scene['emotion']}\nCAMERA: {scene['camera']}\n"
+                f"VISUAL EVENT: {scene['visual_event']}\nBEAT {beat}: {scene[key]}"
             )
-            print("=" * 60)
-            print(f"Generating image {index}/{SCENE_COUNT}, beat {beat}/2...")
-            generate_image(image_prompt, image_path)
-            scene_images.append(image_path)
-        images.append(scene_images)
+            print(f"Generating image {i}/{SCENE_COUNT}, beat {beat}/2")
+            generate_image(prompt, path)
+            scene_imgs.append(path)
+        images.append(scene_imgs)
 
-    # Actual voice duration drives every visual beat.
-    scene_durations = [max(3.8, ffprobe_duration(v)) for v in voice_files]
-    total_duration = sum(scene_durations)
-    print("Scene voice durations:", [round(x, 2) for x in scene_durations])
-    print("Total duration:", round(total_duration, 2), "seconds")
+    raw_durations = [max(3.2, ffprobe_duration(v)) for v in voice_files]
+    total_voice = sum(raw_durations)
+    print("Raw total duration:", round(total_voice, 2))
 
-    if total_duration > TARGET_MAX_SECONDS:
-        print(
-            f"WARNING: voice duration {total_duration:.2f}s exceeds "
-            f"target {TARGET_MAX_SECONDS}s. Keeping audio/visual sync."
-        )
+    # Keep the natural TTS if <=60 sec. If slightly long, speed audio only enough to fit 58.5 sec.
+    target = min(TARGET_MAX_SECONDS, max(TARGET_MIN_SECONDS, total_voice))
+    speed = 1.0
+    if total_voice > 58.5:
+        speed = min(1.15, total_voice / 58.5)
+    if speed != 1.0:
+        print(f"Voice total {total_voice:.2f}s -> tempo factor {speed:.3f}")
+
+    scene_durations = []
+    scene_audio = []
+    for i, (voice, raw) in enumerate(zip(voice_files, raw_durations), 1):
+        audio = voice
+        if speed != 1.0:
+            adjusted = WORK / f"voice_adj_{i:02d}.m4a"
+            atempo = speed
+            filters = []
+            while atempo > 2.0:
+                filters.append("atempo=2.0"); atempo /= 2.0
+            while atempo < 0.5:
+                filters.append("atempo=0.5"); atempo /= 0.5
+            filters.append(f"atempo={atempo:.5f}")
+            run_command(["ffmpeg", "-y", "-i", str(voice), "-filter:a", ",".join(filters), "-c:a", "aac", "-b:a", "128k", str(adjusted)])
+            audio = adjusted
+        scene_audio.append(audio)
+        scene_durations.append(ffprobe_duration(audio))
 
     clips = []
-    scene_audio = []
+    audio_parts = []
+    for i, (imgs, scene, duration, voice) in enumerate(zip(images, story["scenes"], scene_durations, scene_audio), 1):
+        # Two beats; second beat gets slightly more time for the reaction/payoff.
+        b1 = duration * 0.44
+        b2 = duration - b1
+        for beat_idx, (img, bd) in enumerate(zip(imgs, [b1, b2]), 1):
+            clip = WORK / f"clip_{i:02d}_{beat_idx}.mp4"
+            frames = max(1, int(bd * 30))
+            text = esc(scene["text"] if beat_idx == 1 else "")
 
-    for index, (scene_images, scene, duration, voice) in enumerate(
-        zip(images, story["scenes"], scene_durations, voice_files), 1
-    ):
-        # Two quick visual beats within each spoken scene.
-        beat1 = max(1.55, duration * 0.48)
-        beat2 = max(1.55, duration - beat1)
-        beat_durations = [beat1, beat2]
-
-        for beat_index, (image, beat_duration) in enumerate(
-            zip(scene_images, beat_durations), 1
-        ):
-            clip = WORK / f"clip_{index:02d}_{beat_index}.mp4"
-            text = esc(scene["text"] if beat_index == 1 else "")
-            frames = max(1, int(beat_duration * 30))
-
-            # Deliberately varied camera motion. The second beat reverses
-            # direction so the viewer gets a visible change even though
-            # the source is a still frame.
-            if beat_index == 1:
-                if index % 3 == 1:
-                    zoom = (
-                        "zoompan=z='min(zoom+0.0018,1.14)':"
-                        "x='iw/2-(iw/zoom/2)':"
-                        "y='ih/2-(ih/zoom/2)'")
-                elif index % 3 == 2:
-                    zoom = (
-                        "zoompan=z='min(zoom+0.0015,1.12)':"
-                        "x='iw/2-(iw/zoom/2)-on*0.16':"
-                        "y='ih/2-(ih/zoom/2)'")
+            # Stronger motion than V4: zoom + lateral travel + vertical drift.
+            if beat_idx == 1:
+                if i % 4 == 1:
+                    motion = "zoompan=z='min(zoom+0.0020,1.16)':x='iw/2-(iw/zoom/2)-on*0.20':y='ih/2-(ih/zoom/2)-on*0.06'"
+                elif i % 4 == 2:
+                    motion = "zoompan=z='min(zoom+0.0017,1.14)':x='iw/2-(iw/zoom/2)+on*0.20':y='ih/2-(ih/zoom/2)+on*0.05'"
+                elif i % 4 == 3:
+                    motion = "zoompan=z='max(1.13-on*0.0010,1.0)':x='iw/2-(iw/zoom/2)-on*0.16':y='ih/2-(ih/zoom/2)+on*0.10'"
                 else:
-                    zoom = (
-                        "zoompan=z='max(1.12-on*0.0010,1.0)':"
-                        "x='iw/2-(iw/zoom/2)+on*0.14':"
-                        "y='ih/2-(ih/zoom/2)'")
+                    motion = "zoompan=z='min(zoom+0.0019,1.15)':x='iw/2-(iw/zoom/2)+on*0.14':y='ih/2-(ih/zoom/2)-on*0.10'"
             else:
-                if index % 3 == 1:
-                    zoom = (
-                        "zoompan=z='max(1.13-on*0.0009,1.0)':"
-                        "x='iw/2-(iw/zoom/2)+on*0.18':"
-                        "y='ih/2-(ih/zoom/2)'")
-                elif index % 3 == 2:
-                    zoom = (
-                        "zoompan=z='min(zoom+0.0017,1.14)':"
-                        "x='iw/2-(iw/zoom/2)':"
-                        "y='ih/2-(ih/zoom/2)-on*0.13'")
+                if i % 4 == 1:
+                    motion = "zoompan=z='min(zoom+0.0022,1.17)':x='iw/2-(iw/zoom/2)+on*0.22':y='ih/2-(ih/zoom/2)+on*0.08'"
+                elif i % 4 == 2:
+                    motion = "zoompan=z='max(1.15-on*0.0011,1.0)':x='iw/2-(iw/zoom/2)-on*0.18':y='ih/2-(ih/zoom/2)-on*0.07'"
+                elif i % 4 == 3:
+                    motion = "zoompan=z='min(zoom+0.0020,1.16)':x='iw/2-(iw/zoom/2)+on*0.18':y='ih/2-(ih/zoom/2)'"
                 else:
-                    zoom = (
-                        "zoompan=z='min(zoom+0.0014,1.12)':"
-                        "x='iw/2-(iw/zoom/2)-on*0.16':"
-                        "y='ih/2-(ih/zoom/2)'")
+                    motion = "zoompan=z='min(zoom+0.0018,1.14)':x='iw/2-(iw/zoom/2)-on*0.18':y='ih/2-(ih/zoom/2)'"
 
-            drawtext = ""
+            draw = ""
             if text:
-                drawtext = (
-                    ",drawtext=text='" + text + "':"
-                    "fontcolor=white:fontsize=58:"
-                    "fontfile=/usr/share/fonts/truetype/noto/"
-                    "NotoSansDevanagari-Regular.ttf:"
-                    "x=(w-text_w)/2:y=h-text_h-190:"
-                    "shadowcolor=black@0.90:shadowx=3:shadowy=3"
-                )
+                draw = ",drawtext=text='" + text + "':fontcolor=white:fontsize=58:fontfile=/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf:x=(w-text_w)/2:y=h-text_h-190:shadowcolor=black@0.92:shadowx=3:shadowy=3"
 
-            vf = (
-                "scale=1080:1920:force_original_aspect_ratio=increase,"
-                "crop=1080:1920," + zoom +
-                f":d={frames}:s=1080x1920:fps=30" + drawtext
-            )
-
-            print(
-                f"Building visual beat {index}/{SCENE_COUNT} "
-                f"beat {beat_index}/2..."
-            )
-            run_command([
-                "ffmpeg", "-y", "-loop", "1",
-                "-i", str(image),
-                "-t", str(beat_duration),
-                "-vf", vf,
-                "-an", "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-pix_fmt", "yuv420p",
-                str(clip)
-            ])
+            vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," + motion + f":d={frames}:s=1080x1920:fps=30" + draw
+            run_command(["ffmpeg", "-y", "-loop", "1", "-i", str(img), "-t", str(bd), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", str(clip)])
             clips.append(clip)
 
-        # Audio remains exactly one scene long, preserving narration sync.
-        sfx_name = scene.get("sfx", "none")
-        audio_out = WORK / f"scene_audio_{index:02d}.m4a"
-
-        if sfx_name != "none":
-            sfx = make_tone(
-                WORK / f"sfx_{index:02d}.wav",
-                sfx_name,
-                0.28 if sfx_name != "whoosh" else 0.42
-            )
+        # SFX at scene start, kept below speech.
+        sfx_kind = scene.get("sfx", "none")
+        if sfx_kind != "none":
+            sfx = make_tone(WORK / f"sfx_{i:02d}.wav", sfx_kind, 0.34 if sfx_kind == "whoosh" else 0.26)
+            out = WORK / f"scene_audio_{i:02d}.m4a"
             run_command([
-                "ffmpeg", "-y",
-                "-i", str(voice),
-                "-i", str(sfx),
-                "-filter_complex",
-                "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[v];"
-                "[1:a]adelay=120|120,volume=0.48[s];"
-                "[v][s]amix=inputs=2:duration=first,"
-                "loudnorm=I=-15:TP=-1.5:LRA=10[a]",
-                "-map", "[a]",
-                "-c:a", "aac", "-b:a", "128k",
-                str(audio_out)
+                "ffmpeg", "-y", "-i", str(voice), "-i", str(sfx),
+                "-filter_complex", "[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[v];[1:a]adelay=80|80,volume=0.32[s];[v][s]amix=inputs=2:duration=first,loudnorm=I=-15:TP=-1.5:LRA=10[a]",
+                "-map", "[a]", "-c:a", "aac", "-b:a", "128k", str(out)
             ])
+            audio_parts.append(out)
         else:
-            run_command([
-                "ffmpeg", "-y", "-i", str(voice),
-                "-filter:a", "loudnorm=I=-16:TP=-1.5:LRA=11",
-                "-c:a", "aac", "-b:a", "128k",
-                str(audio_out)
-            ])
+            audio_parts.append(voice)
 
-        scene_audio.append(audio_out)
+    concat = WORK / "concat.txt"
+    concat.write_text("\n".join(f"file '{c.as_posix()}'" for c in clips), encoding="utf-8")
+    silent = WORK / "silent.mp4"
+    run_command(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat), "-c", "copy", str(silent)])
 
-    # Concatenate all 20 visual beats.
-    concat_file = WORK / "concat.txt"
-    concat_file.write_text(
-        "\n".join(f"file '{c.as_posix()}'" for c in clips),
-        encoding="utf-8"
-    )
-    silent_video = WORK / "silent.mp4"
-    run_command([
-        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-        "-i", str(concat_file), "-c", "copy", str(silent_video)
-    ])
-
-    # Concatenate scene audio.
     audio_concat = WORK / "audio_concat.txt"
-    audio_concat.write_text(
-        "\n".join(f"file '{a.as_posix()}'" for a in scene_audio),
-        encoding="utf-8"
-    )
-    narration_audio = WORK / "narration_mix.m4a"
-    run_command([
-        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-        "-i", str(audio_concat), "-c:a", "aac", "-b:a", "128k",
-        str(narration_audio)
-    ])
+    audio_concat.write_text("\n".join(f"file '{a.as_posix()}'" for a in audio_parts), encoding="utf-8")
+    narration = WORK / "narration.m4a"
+    run_command(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(audio_concat), "-c:a", "aac", "-b:a", "128k", str(narration)])
 
-    # Keep the music clearly underneath narration.
-    music = make_music(
-        WORK / "music.wav",
-        max(65.0, total_duration + 4)
-    )
-    mixed_audio = WORK / "mixed.m4a"
+    final_video_duration = ffprobe_duration(silent)
+    music = make_music(WORK / "music.wav", final_video_duration + 2)
+    mixed = WORK / "mixed.m4a"
     run_command([
-        "ffmpeg", "-y",
-        "-i", str(narration_audio),
-        "-i", str(music),
-        "-filter_complex",
-        "[0:a]volume=1.0[voice];"
-        "[1:a]volume=0.16[music];"
-        "[voice][music]amix=inputs=2:duration=first,"
-        "loudnorm=I=-14:TP=-1:LRA=10[a]",
-        "-map", "[a]", "-c:a", "aac", "-b:a", "128k",
-        str(mixed_audio)
+        "ffmpeg", "-y", "-i", str(narration), "-i", str(music),
+        "-filter_complex", "[0:a]volume=1.0[voice];[1:a]volume=0.10[music];[voice][music]amix=inputs=2:duration=first,loudnorm=I=-14:TP=-1:LRA=10[a]",
+        "-map", "[a]", "-c:a", "aac", "-b:a", "128k", str(mixed)
     ])
-
-    run_command([
-        "ffmpeg", "-y",
-        "-i", str(silent_video),
-        "-i", str(mixed_audio),
-        "-map", "0:v:0", "-map", "1:a:0",
-        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
-        "-shortest", str(OUT)
-    ])
+    run_command(["ffmpeg", "-y", "-i", str(silent), "-i", str(mixed), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", str(OUT)])
 
     if not OUT.exists() or OUT.stat().st_size == 0:
         raise RuntimeError("Final video was not created.")
-
-    print("FINAL VIDEO CREATED:", OUT)
-
+    print("FINAL VIDEO CREATED:", OUT, "duration=", round(ffprobe_duration(OUT), 2))
 
 # ============================================================
-# YOUTUBE UPLOAD
+# YOUTUBE
 # ============================================================
 
 def upload_youtube():
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
     from google.oauth2.credentials import Credentials
-
-    required = [
-        "YOUTUBE_REFRESH_TOKEN",
-        "YOUTUBE_CLIENT_ID",
-        "YOUTUBE_CLIENT_SECRET"
-    ]
-    for key in required:
+    for key in ["YOUTUBE_REFRESH_TOKEN", "YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"]:
         if not os.environ.get(key):
             raise RuntimeError(f"{key} is missing.")
-
     credentials = Credentials(
-        None,
-        refresh_token=os.environ["YOUTUBE_REFRESH_TOKEN"],
+        None, refresh_token=os.environ["YOUTUBE_REFRESH_TOKEN"],
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=os.environ["YOUTUBE_CLIENT_ID"],
-        client_secret=os.environ["YOUTUBE_CLIENT_SECRET"],
+        client_id=os.environ["YOUTUBE_CLIENT_ID"], client_secret=os.environ["YOUTUBE_CLIENT_SECRET"],
         scopes=["https://www.googleapis.com/auth/youtube.upload"]
     )
-
     youtube = build("youtube", "v3", credentials=credentials)
-
     metadata = json.loads(META.read_text(encoding="utf-8"))
     title = metadata["title"][:95] + " #Shorts"
-
     description = (
-        metadata["hook"]
-        + "\n\n"
-        "🌈 Toon Kids पर रोज़ नई हिंदी कहानी!"
-        "\n❤️ इस कहानी से आपको क्या सीख मिली?"
-        "\n\n"
-        "#shorts #toonkids #hindistory "
-        "#kidsstory #moralstory #hindikahani"
+        metadata["hook"] + "\n\n"
+        "🌈 Toon Kids पर रोज़ नई हिंदी कहानी!\n"
+        "❤️ इस कहानी से आपको क्या सीख मिली?\n\n"
+        "#shorts #toonkids #hindistory #kidsstory #moralstory #hindikahani"
     )
-
     body = {
         "snippet": {
-            "title": title,
-            "description": description,
-            "tags": [
-                "toon kids", "hindi kids story", "kids story",
-                "hindi kahani", "moral story", "bachon ki kahani",
-                "kids shorts", "bedtime story"
-            ],
+            "title": title, "description": description,
+            "tags": ["toon kids", "hindi kids story", "kids story", "hindi kahani", "moral story", "bachon ki kahani", "kids shorts", "bedtime story"],
             "categoryId": "27"
         },
-        "status": {
-            "privacyStatus": "public",
-            "selfDeclaredMadeForKids": True
-        }
+        "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": True}
     }
-
     print("Uploading video to YouTube...")
-    request = youtube.videos().insert(
-        part="snippet,status",
-        body=body,
-        media_body=MediaFileUpload(
-            str(OUT),
-            mimetype="video/mp4",
-            resumable=True
-        )
-    )
-    response = request.execute()
-
-    print("YouTube upload successful!")
-    print("Video ID:", response.get("id"))
-
+    response = youtube.videos().insert(
+        part="snippet,status", body=body,
+        media_body=MediaFileUpload(str(OUT), mimetype="video/mp4", resumable=True)
+    ).execute()
+    print("YouTube upload successful! Video ID:", response.get("id"))
 
 # ============================================================
 # MAIN
@@ -1023,103 +716,58 @@ def upload_youtube():
 
 def main():
     print("=" * 60)
-    print("TOON KIDS AUTOMATION V4 STARTED")
+    print("TOON KIDS AUTOMATION V5 STARTED")
     print("=" * 60)
-
-    required_env = [
-        "GEMINI_API_KEY",
-        "CLOUDFLARE_API_TOKEN",
-        "CLOUDFLARE_ACCOUNT_ID"
-    ]
-    for key in required_env:
+    for key in ["GEMINI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"]:
         if not os.environ.get(key):
             raise RuntimeError(f"Required secret missing: {key}")
 
     history = load_history()
     print("Permanent accepted-story history:", len(history))
 
-    # No total story limit. Each run keeps generating until it gets
-    # a novel accepted story, with a finite retry guard for API safety.
-    accepted_story = None
-    accepted_topic = None
-
-    for generation_attempt in range(MAX_DUPLICATE_RETRIES):
-        topic = choose_topic(history)
-        print(
-            f"Novel story attempt {generation_attempt + 1}/"
-            f"{MAX_DUPLICATE_RETRIES}"
-        )
-        print("Selected topic:", topic)
-
-        story = generate_story(topic, history)
-        duplicate, reason = is_duplicate_story(story, topic, history)
-
-        if duplicate:
-            print("DUPLICATE/SIMILAR STORY REJECTED:", reason)
+    story = None
+    topic = None
+    for attempt in range(MAX_DUPLICATE_RETRIES):
+        candidate_topic = choose_topic(history)
+        print(f"Novel story attempt {attempt+1}/{MAX_DUPLICATE_RETRIES}")
+        candidate = generate_story(candidate_topic, history)
+        dup, reason = is_duplicate_story(candidate, candidate_topic, history)
+        if dup:
+            print("REJECTED duplicate/similar:", reason)
             continue
-
-        accepted_story = story
-        accepted_topic = topic
+        story, topic = candidate, candidate_topic
         break
+    if story is None:
+        raise RuntimeError("Could not obtain a sufficiently novel story after retries. Nothing uploaded.")
 
-    if accepted_story is None:
-        raise RuntimeError(
-            "Could not obtain a sufficiently novel story after retries. "
-            "No story was added to history and no video was uploaded."
-        )
-
-    story = accepted_story
-    topic = accepted_topic
-
-    print("Accepted NEW story:", story["title"])
-
-    # Save only AFTER duplicate validation.
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "title": story["title"],
-        "topic": topic,
+        "title": story["title"], "topic": topic,
         "fingerprint": story_fingerprint(story, topic),
         "story_text": compact_story_text(story, topic),
-        "character_bible": story["character_bible"],
-        "moral": story["moral"]
+        "character_bible": story["character_bible"], "moral": story["moral"]
     }
     history.append(entry)
     save_history(history)
-    print("Permanent story history saved. Total:", len(history))
 
-    META.write_text(
-        json.dumps({
-            "title": story["title"],
-            "hook": story["hook"],
-            "moral": story["moral"],
-            "topic": topic,
-            "scenes": SCENE_COUNT,
-            "visual_beats_per_scene": 2,
-            "target_duration": "48-60 seconds"
-        }, ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
+    META.write_text(json.dumps({
+        "title": story["title"], "hook": story["hook"], "moral": story["moral"],
+        "topic": topic, "scenes": SCENE_COUNT, "visual_beats_per_scene": 2,
+        "target_duration": "50-58 seconds", "version": "V5"
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print("Generating energetic Hindi scene voices...")
-    voice_files = tts(story)
+    voices = tts(story)
+    build_video(story, voices)
 
-    print("Building action-driven video...")
-    build_video(story, voice_files)
-
-    upload_enabled = (
-        os.getenv("UPLOAD_YOUTUBE", "true").lower() == "true"
-    )
-
-    if upload_enabled:
+    if os.getenv("UPLOAD_YOUTUBE", "true").lower() == "true":
         upload_youtube()
     else:
         print("YouTube upload disabled.")
 
     print("=" * 60)
-    print("TOON KIDS AUTOMATION V4 COMPLETED")
+    print("TOON KIDS AUTOMATION V5 COMPLETED")
     print("=" * 60)
 
 
 if __name__ == "__main__":
     main()
-
