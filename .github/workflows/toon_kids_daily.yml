@@ -2,6 +2,7 @@ name: Toon Kids AI Stories
 
 on:
   workflow_dispatch:
+
   schedule:
     - cron: "30 7 * * *"   # 1:00 PM IST
     - cron: "0 15 * * *"   # 8:30 PM IST
@@ -23,13 +24,14 @@ jobs:
 
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_IMAGE_MODEL: "@cf/black-forest-labs/flux-2-klein-4b"
 
       YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
       YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
 
-      TTS_RATE: "+18%"
-      TTS_PITCH: "+4Hz"
+      TTS_RATE: "+16%"
+      TTS_PITCH: "+3Hz"
       UPLOAD_YOUTUBE: "true"
 
       RUN_SLOT: ${{ github.event.schedule == '30 7 * * *' && '0' || github.event.schedule == '0 15 * * *' && '1' || 'manual' }}
@@ -53,53 +55,44 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install \
-            google-genai \
-            google-api-python-client \
-            google-auth \
-            google-auth-oauthlib \
-            edge-tts \
-            pillow \
-            requests
+          pip install google-genai google-api-python-client google-auth google-auth-oauthlib edge-tts pillow requests
 
       - name: Validate secrets
         shell: bash
         run: |
-          echo "Checking required secrets..."
-          test -n "$GEMINI_API_KEY" || { echo "❌ Missing GEMINI_API_KEY"; exit 1; }
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "❌ Missing CLOUDFLARE_API_TOKEN"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "❌ Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
-          test -n "$YOUTUBE_CLIENT_ID" || { echo "❌ Missing YOUTUBE_CLIENT_ID"; exit 1; }
-          test -n "$YOUTUBE_CLIENT_SECRET" || { echo "❌ Missing YOUTUBE_CLIENT_SECRET"; exit 1; }
-          test -n "$YOUTUBE_REFRESH_TOKEN" || { echo "❌ Missing YOUTUBE_REFRESH_TOKEN"; exit 1; }
-          echo "✅ All required secrets are present."
+          test -n "$GEMINI_API_KEY" || { echo "Missing GEMINI_API_KEY"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          test -n "$YOUTUBE_CLIENT_ID" || { echo "Missing YOUTUBE_CLIENT_ID"; exit 1; }
+          test -n "$YOUTUBE_CLIENT_SECRET" || { echo "Missing YOUTUBE_CLIENT_SECRET"; exit 1; }
+          test -n "$YOUTUBE_REFRESH_TOKEN" || { echo "Missing YOUTUBE_REFRESH_TOKEN"; exit 1; }
+          echo "All required secrets are present."
+
+      - name: Validate Python before generation
+        run: |
+          python -m py_compile src/toon_kids_story.py
+          echo "Python syntax OK."
 
       - name: Show configuration
         run: |
-          echo "=========================================="
-          echo "TOON KIDS V5"
-          echo "=========================================="
+          echo "TOON KIDS V6"
           python --version
           ffmpeg -version | head -n 1
-          echo "Gemini primary: $GEMINI_TEXT_MODEL"
+          echo "Gemini: $GEMINI_TEXT_MODEL"
           echo "Gemini fallback: $GEMINI_FALLBACK_MODEL"
-          echo "Cloudflare image model: @cf/black-forest-labs/flux-1-schnell"
-          echo "TTS rate: $TTS_RATE"
-          echo "TTS pitch: $TTS_PITCH"
+          echo "Cloudflare image model: $CLOUDFLARE_IMAGE_MODEL"
+          echo "TTS: $TTS_RATE / $TTS_PITCH"
           echo "Run slot: $RUN_SLOT"
-          echo "Upload: $UPLOAD_YOUTUBE"
-          echo "=========================================="
 
-      - name: Generate Toon Kids V5 Short
+      - name: Generate Toon Kids Short
         run: |
-          python -m py_compile src/toon_kids_story.py
           python src/toon_kids_story.py
 
       - name: Verify video
         run: |
-          test -s toon_kids_short.mp4 || { echo "❌ Video missing"; exit 1; }
-          test -s story_metadata.json || { echo "❌ Metadata missing"; exit 1; }
-          echo "✅ Video created"
+          test -s toon_kids_short.mp4 || { echo "Video missing"; exit 1; }
+          test -s story_metadata.json || { echo "Metadata missing"; exit 1; }
+          echo "Video:"
           ls -lh toon_kids_short.mp4
           echo "Metadata:"
           cat story_metadata.json
