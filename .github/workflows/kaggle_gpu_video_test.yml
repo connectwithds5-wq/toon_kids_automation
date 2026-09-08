@@ -13,6 +13,7 @@ jobs:
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_KEY }}
       KAGGLE_KERNEL: ${{ secrets.KAGGLE_USERNAME }}/toon-kids-gpu-test
 
     steps:
@@ -24,6 +25,7 @@ jobs:
         run: |
           test -n "$KAGGLE_USERNAME" || { echo "❌ Add GitHub secret KAGGLE_USERNAME first."; exit 1; }
           test -n "$KAGGLE_KEY" || { echo "❌ Add GitHub secret KAGGLE_KEY first."; exit 1; }
+          test -n "$KAGGLE_API_TOKEN" || { echo "❌ Kaggle API token is missing."; exit 1; }
           echo "✅ Kaggle credentials found."
 
       - name: Install Kaggle CLI
