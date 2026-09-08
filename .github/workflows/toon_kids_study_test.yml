@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      TTS_RATE: "+2%"
+      TTS_RATE: "+0%"
 
     steps:
       - name: Checkout repository
@@ -35,26 +35,27 @@ jobs:
           pip install edge-tts pillow
 
       - name: Validate Python
-        run: python -m py_compile src/toon_kids_study_fun_v2.py
+        run: python -m py_compile src/toon_kids_study_v3.py
 
-      - name: Generate Kids Study Short
-        run: python src/toon_kids_study_fun_v2.py
+      - name: Generate Kids Study Short V3
+        run: python src/toon_kids_study_v3.py
 
       - name: Verify output
         run: |
           test -s toon_kids_study_short.mp4 || { echo "❌ Study video missing"; exit 1; }
           test -s study_story_metadata.json || { echo "❌ Study metadata missing"; exit 1; }
-          echo "✅ Kids Study Short generated."
+          echo "✅ Kids Study V3 generated."
           ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 toon_kids_study_short.mp4
+          ffprobe -v error -show_entries stream=width,height,r_frame_rate -of default=noprint_wrappers=1 toon_kids_study_short.mp4
           cat study_story_metadata.json
 
       - name: Commit study story history
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add study_story_history.json
+          git add story_history.json
           if git diff --cached --quiet; then
-            echo "No study story history changes."
+            echo "No story history changes."
           else
             git commit -m "Update Kids Study story history"
             git push
@@ -63,7 +64,7 @@ jobs:
       - name: Upload video artifact
         uses: actions/upload-artifact@v4
         with:
-          name: toon-kids-study-short
+          name: toon-kids-study-short-v3
           path: |
             toon_kids_study_short.mp4
             study_story_metadata.json
@@ -71,4 +72,4 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -rf work
+        run: rm -rf work_study_v3
