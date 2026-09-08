@@ -40,6 +40,15 @@ jobs:
           python -m py_compile src/toon_kids_study_story.py
           echo "✅ Python syntax OK."
 
+      - name: Fix FFmpeg zoompan expression
+        run: |
+          # FFmpeg zoompan uses `duration` for the configured frame count.
+          # The shared animation code historically used `d`, which causes:
+          # "Undefined constant or missing '(' in 'd-1'" on current FFmpeg.
+          sed -i 's/(d-1)/(duration-1)/g' src/toon_kids_story.py
+          grep -n "duration-1" src/toon_kids_story.py || true
+          echo "✅ zoompan expression fixed for this run."
+
       - name: Generate Kids Study Short
         run: python src/toon_kids_study_story.py
 
