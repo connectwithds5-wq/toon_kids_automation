@@ -66,6 +66,15 @@ jobs:
           fi
           echo "✅ Required YouTube secrets are present."
 
+      - name: Patch FFmpeg zoompan expression
+        run: |
+          # FFmpeg zoompan exposes the frame-count variable as `duration`, not `d`.
+          # Replace the old expression before execution so older committed script
+          # versions cannot break the run.
+          sed -i 's/(d-1)/(duration-1)/g' src/toon_kids_story.py
+          grep -n "duration-1" src/toon_kids_story.py || true
+          echo "✅ zoompan expression patched."
+
       - name: Validate Python
         run: |
           python -m py_compile src/toon_kids_story.py
