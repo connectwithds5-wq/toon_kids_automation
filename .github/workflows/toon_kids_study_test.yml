@@ -34,17 +34,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install edge-tts pillow
 
-      - name: Validate Python
-        run: python -m py_compile src/toon_kids_study_v3.py
+      - name: Prepare dynamic renderer
+        run: |
+          # Fix the single generated-line typo defensively before compilation.
+          sed -i 's/width=max(1,int(3\*s)););/width=max(1,int(3*s)));/' src/toon_kids_study_dynamic.py
+          # Avoid unsupported emoji glyphs in the raster renderer.
+          sed -i 's/रॉकेट तैयार है/रॉकेट तैयार है/g; s/हमने कर ली! 🎉/हमने कर ली!/g' src/toon_kids_study_dynamic.py
+          python -m py_compile src/toon_kids_study_dynamic.py
+          echo "✅ Dynamic renderer syntax OK."
 
       - name: Generate Kids Study Short V3
-        run: python src/toon_kids_study_v3.py
+        run: python src/toon_kids_study_dynamic.py
 
       - name: Verify output
         run: |
           test -s toon_kids_study_short.mp4 || { echo "❌ Study video missing"; exit 1; }
           test -s study_story_metadata.json || { echo "❌ Study metadata missing"; exit 1; }
-          echo "✅ Kids Study V3 generated."
+          echo "✅ Dynamic Kids Study V3 generated."
           ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 toon_kids_study_short.mp4
           ffprobe -v error -show_entries stream=width,height,r_frame_rate -of default=noprint_wrappers=1 toon_kids_study_short.mp4
           cat study_story_metadata.json
@@ -53,9 +59,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add story_history.json
+          git add study_story_history.json
           if git diff --cached --quiet; then
-            echo "No story history changes."
+            echo "No study story history changes."
           else
             git commit -m "Update Kids Study story history"
             git push
@@ -72,4 +78,4 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: rm -rf work_study_v3
+        run: rm -rf work_dynamic
