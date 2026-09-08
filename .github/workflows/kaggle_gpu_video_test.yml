@@ -38,7 +38,7 @@ jobs:
           cat > kaggle_kernel/kernel-metadata.json <<EOF
           {
             "id": "${KAGGLE_KERNEL}",
-            "title": "Toon Kids GPU Video Test ${GITHUB_RUN_ID}",
+            "title": "Toon Kids GPU Test ${GITHUB_RUN_ID}",
             "code_file": "generate_test.py",
             "language": "python",
             "kernel_type": "script",
@@ -60,9 +60,6 @@ jobs:
       - name: Wait for Kaggle output
         shell: bash
         run: |
-          # Kaggle's kernel-status endpoint is currently returning a permission
-          # error even though kernel creation/execution succeeds. Use the output
-          # endpoint as the completion signal instead of polling kernel status.
           rm -rf kaggle_output
           mkdir -p kaggle_output
 
