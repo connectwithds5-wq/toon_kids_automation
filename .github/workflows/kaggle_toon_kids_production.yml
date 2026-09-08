@@ -1,0 +1,96 @@
+name: Toon Kids - Kaggle GPU Production Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kaggle-toon-kids-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_KERNEL: ${{ secrets.KAGGLE_USERNAME }}/toon-kids-production-${{ github.run_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Kaggle credentials
+        shell: bash
+        run: |
+          test -n "$KAGGLE_USERNAME" || { echo "Missing KAGGLE_USERNAME"; exit 1; }
+          test -n "$KAGGLE_KEY" || { echo "Missing KAGGLE_KEY"; exit 1; }
+          echo "Kaggle credentials found."
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --upgrade kaggle
+
+      - name: Prepare Kaggle production kernel
+        shell: bash
+        run: |
+          mkdir -p kaggle_kernel
+          cp tools/kaggle_toon_kids_production.py kaggle_kernel/generate_video.py
+          cat > kaggle_kernel/kernel-metadata.json <<EOF
+          {
+            "id": "${KAGGLE_KERNEL}",
+            "title": "Toon Kids Production ${GITHUB_RUN_ID}",
+            "code_file": "generate_video.py",
+            "language": "python",
+            "kernel_type": "script",
+            "is_private": "false",
+            "enable_gpu": "true",
+            "enable_internet": "true",
+            "machine_shape": "NvidiaTeslaT4",
+            "dataset_sources": [],
+            "competition_sources": [],
+            "kernel_sources": [],
+            "model_sources": []
+          }
+          EOF
+          cat kaggle_kernel/kernel-metadata.json
+
+      - name: Push and run on Kaggle T4
+        run: kaggle kernels push -p kaggle_kernel
+
+      - name: Wait for Kaggle output
+        shell: bash
+        run: |
+          rm -rf kaggle_output
+          mkdir -p kaggle_output
+          for i in $(seq 1 40); do
+            echo "--- Output poll $i/40 ---"
+            rm -rf kaggle_output/*
+            if kaggle kernels output "$KAGGLE_KERNEL" -p kaggle_output --force 2>&1; then
+              find kaggle_output -maxdepth 2 -type f -print
+              if find kaggle_output -type f -name 'toon_kids_production_test.mp4' | grep -q .; then
+                echo "Production MP4 is ready."
+                exit 0
+              fi
+            else
+              echo "Kaggle output is not ready yet."
+            fi
+            sleep 45
+          done
+          echo "Kaggle did not return the production MP4 within the wait window."
+          exit 1
+
+      - name: Verify production video
+        shell: bash
+        run: |
+          VIDEO=$(find kaggle_output -type f -name 'toon_kids_production_test.mp4' | head -n 1)
+          test -n "$VIDEO" || { echo "No production MP4 returned."; exit 1; }
+          cp "$VIDEO" toon_kids_production_test.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 toon_kids_production_test.mp4
+          ls -lh toon_kids_production_test.mp4
+
+      - name: Upload production test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toon-kids-production-test
+          path: toon_kids_production_test.mp4
+          retention-days: 3
