@@ -1,10 +1,9 @@
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 # High-quality free GPU path:
-# storyboard image -> Wan 2.1 I2V 1.3B -> Hindi voice -> generated music -> 9:16 short.
+# portrait storyboard -> Wan 2.1 I2V 1.3B -> Hindi voice -> generated music -> 9:16 short.
 # The 1.3B I2V model is used instead of AnimateDiff text-to-video because the
 # first frame anchors the character design and improves scene continuity.
 
@@ -30,8 +29,10 @@ from diffusers.utils import export_to_video
 OUT = Path("/kaggle/working")
 FRAMES = 49
 FPS = 16
-WIDTH = 832
-HEIGHT = 480
+MODEL_WIDTH = 832
+MODEL_HEIGHT = 480
+PORTRAIT_WIDTH = 480
+PORTRAIT_HEIGHT = 832
 MODEL_ID = "engineerA314/Wan2.1-Fun-V1.1-1.3B-InP-Diffusers"
 
 print("GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "NONE")
@@ -55,7 +56,7 @@ story = {
 STYLE = (
     "premium 3D preschool animated film, cute rounded character design, soft cinematic lighting, "
     "colorful magical environment, polished family animation, adorable expressive face, clean shapes, "
-    "gentle depth of field, smooth natural motion, vertical social video composition, no text, no subtitles, no watermark"
+    "gentle depth of field, smooth natural motion, no text, no subtitles, no watermark"
 )
 NEGATIVE = (
     "blurry, low quality, flicker, jitter, deformed face, distorted anatomy, extra limbs, duplicate character, "
@@ -64,30 +65,30 @@ NEGATIVE = (
 
 
 def make_storyboard_image(path: Path):
-    # Deterministic clean anchor. Wan provides the temporal animation; keeping this
-    # frame stable prevents the character from being redesigned every scene.
-    img = Image.new("RGB", (WIDTH, HEIGHT), (169, 222, 255))
+    # Build the anchor in portrait. Wan's recommended 480p I2V shape is landscape,
+    # so the anchor is rotated only for inference and rotated back after generation.
+    img = Image.new("RGB", (PORTRAIT_WIDTH, PORTRAIT_HEIGHT), (169, 222, 255))
     d = ImageDraw.Draw(img)
-    d.rectangle((0, 0, WIDTH, int(HEIGHT * 0.66)), fill=(169, 222, 255))
-    d.ellipse((-180, 180, 600, 720), fill=(126, 205, 135))
-    d.ellipse((320, 210, 1050, 760), fill=(103, 190, 120))
-    d.polygon([(330, HEIGHT), (500, 260), (650, 260), (WIDTH - 250, HEIGHT)], fill=(244, 219, 166))
-    for x, y in [(90, 300), (180, 420), (710, 340), (770, 500), (930, 290)]:
+    d.rectangle((0, 0, PORTRAIT_WIDTH, int(PORTRAIT_HEIGHT * 0.66)), fill=(169, 222, 255))
+    d.ellipse((-180, 180, 420, 720), fill=(126, 205, 135))
+    d.ellipse((180, 210, 660, 760), fill=(103, 190, 120))
+    d.polygon([(150, PORTRAIT_HEIGHT), (210, 280), (300, 280), (460, PORTRAIT_HEIGHT)], fill=(244, 219, 166))
+    for x, y in [(60, 300), (110, 420), (350, 340), (390, 500), (445, 290)]:
         d.ellipse((x - 10, y - 10, x + 10, y + 10), fill=(255, 190, 205))
         d.ellipse((x - 5, y - 20, x + 5, y + 20), fill=(255, 245, 130))
-    cx, cy = 390, 470
-    d.ellipse((cx - 115, cy - 105, cx + 115, cy + 135), fill=(250, 250, 250))
-    d.ellipse((cx - 88, cy - 220, cx - 28, cy - 80), fill=(250, 250, 250))
-    d.ellipse((cx + 28, cy - 220, cx + 88, cy - 80), fill=(250, 250, 250))
-    d.ellipse((cx - 67, cy - 198, cx - 43, cy - 105), fill=(245, 160, 185))
-    d.ellipse((cx + 43, cy - 198, cx + 67, cy - 105), fill=(245, 160, 185))
-    d.ellipse((cx - 60, cy - 20, cx - 40, cy), fill=(40, 55, 75))
-    d.ellipse((cx + 40, cy - 20, cx + 60, cy), fill=(40, 55, 75))
+    cx, cy = 225, 470
+    d.ellipse((cx - 105, cy - 105, cx + 105, cy + 135), fill=(250, 250, 250))
+    d.ellipse((cx - 80, cy - 220, cx - 25, cy - 80), fill=(250, 250, 250))
+    d.ellipse((cx + 25, cy - 220, cx + 80, cy - 80), fill=(250, 250, 250))
+    d.ellipse((cx - 60, cy - 198, cx - 40, cy - 105), fill=(245, 160, 185))
+    d.ellipse((cx + 40, cy - 198, cx + 60, cy - 105), fill=(245, 160, 185))
+    d.ellipse((cx - 55, cy - 20, cx - 35, cy), fill=(40, 55, 75))
+    d.ellipse((cx + 35, cy - 20, cx + 55, cy), fill=(40, 55, 75))
     d.ellipse((cx - 16, cy + 12, cx + 16, cy + 34), fill=(235, 125, 145))
-    d.rounded_rectangle((cx - 105, cy + 65, cx + 105, cy + 175), 30, fill=(74, 143, 225))
-    d.ellipse((cx + 135, cy + 30, cx + 175, cy + 70), outline=(255, 215, 60), width=10)
-    d.line((cx + 172, cy + 50, cx + 245, cy + 50), fill=(255, 215, 60), width=12)
-    d.line((cx + 220, cy + 50, cx + 220, cy + 80), fill=(255, 215, 60), width=10)
+    d.rounded_rectangle((cx - 95, cy + 65, cx + 95, cy + 175), 30, fill=(74, 143, 225))
+    d.ellipse((cx + 125, cy + 30, cx + 165, cy + 70), outline=(255, 215, 60), width=10)
+    d.line((cx + 162, cy + 50, cx + 235, cy + 50), fill=(255, 215, 60), width=12)
+    d.line((cx + 210, cy + 50, cx + 210, cy + 80), fill=(255, 215, 60), width=10)
     img.save(path, quality=95)
 
 
@@ -116,16 +117,20 @@ def ffmpeg(args):
     subprocess.check_call(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args])
 
 
-pipe = WanImageToVideoPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
+# T4 is a FP16 GPU; use float16 rather than bfloat16 to avoid unsupported BF16 paths.
+pipe = WanImageToVideoPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.float16)
 pipe.enable_sequential_cpu_offload()
 
 clips = []
 voices = []
 for index, scene in enumerate(story["scenes"], start=1):
     first_frame = OUT / f"anchor_{index:02d}.png"
+    raw_video = OUT / f"scene_raw_{index:02d}.mp4"
     video = OUT / f"scene_{index:02d}.mp4"
     voice = OUT / f"voice_{index:02d}.mp3"
     make_storyboard_image(first_frame)
+    # Rotate portrait -> landscape only for the Wan model's recommended 480p shape.
+    model_image = Image.open(first_frame).convert("RGB").rotate(90, expand=True)
     prompt = (
         f"{story['character']}, {scene['visual']}, {STYLE}. "
         "Keep the character identity, clothes, face, proportions and colors identical to the input image. "
@@ -134,21 +139,23 @@ for index, scene in enumerate(story["scenes"], start=1):
     print(f"Generating Wan I2V scene {index}/{len(story['scenes'])}...")
     with torch.inference_mode():
         result = pipe(
-            image=Image.open(first_frame).convert("RGB"),
+            image=model_image,
             prompt=prompt,
             negative_prompt=NEGATIVE,
-            height=HEIGHT,
-            width=WIDTH,
+            height=MODEL_HEIGHT,
+            width=MODEL_WIDTH,
             num_frames=FRAMES,
             num_inference_steps=24,
             guidance_scale=5.0,
             generator=torch.Generator(device="cuda").manual_seed(1000 + index),
         )
-    export_to_video(result.frames[0], str(video), fps=FPS)
+    export_to_video(result.frames[0], str(raw_video), fps=FPS)
+    # Rotate generated landscape video back to true 9:16 portrait.
+    ffmpeg(["-i", str(raw_video), "-vf", "transpose=2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", str(video)])
     asyncio.run(make_voice(scene["narration"], voice))
     clips.append(video)
     voices.append(voice)
-    del result
+    del result, model_image
     torch.cuda.empty_cache()
 
 scene_final = []
