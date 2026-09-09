@@ -1,4 +1,4 @@
-name: Toon Kids - Wan I2V Episode Test
+name: Toon Kids - Wan I2V Episode V2
 
 on:
   workflow_dispatch:
@@ -7,14 +7,14 @@ permissions:
   contents: read
 
 jobs:
-  wan-episode:
+  wan-episode-v2:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_KEY }}
-      KAGGLE_KERNEL: ${{ secrets.KAGGLE_USERNAME }}/toon-kids-wan-episode-${{ github.run_id }}
+      KAGGLE_KERNEL: ${{ secrets.KAGGLE_USERNAME }}/toon-kids-wan-episode-v2-${{ github.run_id }}
 
     steps:
       - name: Checkout
@@ -35,13 +35,13 @@ jobs:
         run: |
           rm -rf kaggle_kernel
           mkdir -p kaggle_kernel/src
-          cp tools/kaggle_wan_i2v_production.py kaggle_kernel/generate_episode.py
+          cp tools/kaggle_wan_i2v_v2.py kaggle_kernel/generate_episode.py
           cp src/toon_kids_story.py kaggle_kernel/src/toon_kids_story.py
           cp story_history.json kaggle_kernel/story_history.json
           cat > kaggle_kernel/kernel-metadata.json <<EOF
           {
             "id": "${KAGGLE_KERNEL}",
-            "title": "Toon Kids Wan I2V Episode ${GITHUB_RUN_ID}",
+            "title": "Toon Kids Wan I2V V2 ${GITHUB_RUN_ID}",
             "code_file": "generate_episode.py",
             "language": "python",
             "kernel_type": "script",
@@ -55,45 +55,53 @@ jobs:
             "model_sources": []
           }
           EOF
-          echo "Prepared:"; find kaggle_kernel -maxdepth 2 -type f -print
+          echo "Prepared V2 kernel:"; find kaggle_kernel -maxdepth 2 -type f -print
 
       - name: Push and run on Kaggle T4
         run: kaggle kernels push -p kaggle_kernel
 
-      - name: Wait for final MP4
+      - name: Wait for V2 final MP4
         shell: bash
         run: |
           rm -rf kaggle_output
           mkdir -p kaggle_output
-          for i in $(seq 1 100); do
-            echo "--- Kaggle poll $i/100 ---"
+          for i in $(seq 1 140); do
+            echo "--- Kaggle poll $i/140 ---"
             rm -rf kaggle_output/*
             if kaggle kernels output "$KAGGLE_KERNEL" -p kaggle_output --force 2>&1; then
               find kaggle_output -maxdepth 2 -type f -printf '%p %s bytes\n' || true
-              if find kaggle_output -type f -name 'toon_kids_wan_i2v_episode.mp4' | grep -q .; then
-                echo "✅ Final episode returned"
+              if find kaggle_output -type f -name 'toon_kids_wan_i2v_v2.mp4' | grep -q .; then
+                echo "✅ V2 episode returned"
                 exit 0
               fi
             fi
             sleep 60
           done
-          echo "❌ Kaggle did not return the final episode within 100 minutes"
+          echo "❌ Kaggle did not return the V2 episode within the GitHub wait window"
           exit 1
 
-      - name: Verify video properties
+      - name: Verify V2 video properties
         shell: bash
         run: |
-          VIDEO=$(find kaggle_output -type f -name 'toon_kids_wan_i2v_episode.mp4' | head -n 1)
-          test -n "$VIDEO" || { echo "❌ Final MP4 missing"; exit 1; }
-          cp "$VIDEO" toon_kids_wan_i2v_episode.mp4
-          ffprobe -v error -show_entries stream=width,height,duration -of default=noprint_wrappers=1 toon_kids_wan_i2v_episode.mp4
-          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 toon_kids_wan_i2v_episode.mp4)" = "480"
-          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 toon_kids_wan_i2v_episode.mp4)" = "832"
-          ls -lh toon_kids_wan_i2v_episode.mp4
+          VIDEO=$(find kaggle_output -type f -name 'toon_kids_wan_i2v_v2.mp4' | head -n 1)
+          test -n "$VIDEO" || { echo "❌ V2 MP4 missing"; exit 1; }
+          cp "$VIDEO" toon_kids_wan_i2v_v2.mp4
+          ffprobe -v error -show_entries stream=width,height,duration -of default=noprint_wrappers=1 toon_kids_wan_i2v_v2.mp4
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 toon_kids_wan_i2v_v2.mp4)" = "480"
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 toon_kids_wan_i2v_v2.mp4)" = "832"
+          DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 toon_kids_wan_i2v_v2.mp4)
+          python - <<PY
+          d=float("$DURATION")
+          assert d >= 18, f"Episode is too short: {d:.2f}s"
+          assert d <= 30, f"Episode is unexpectedly long: {d:.2f}s"
+          print(f"✅ Episode duration {d:.2f}s")
+          PY
+          ls -lh toon_kids_wan_i2v_v2.mp4
 
-      - name: Upload episode artifact
+      - name: Upload V2 episode artifact
         uses: actions/upload-artifact@v4
         with:
-          name: toon-kids-wan-i2v-episode
-          path: toon_kids_wan_i2v_episode.mp4
+          name: toon-kids-wan-i2v-v2
+          path: toon_kids_wan_i2v_v2.mp4
+          if-no-files-found: error
           retention-days: 7

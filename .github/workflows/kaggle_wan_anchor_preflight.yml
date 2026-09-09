@@ -1,0 +1,123 @@
+name: Toon Kids - Wan V2 Anchor Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  anchor-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_KERNEL: ${{ secrets.KAGGLE_USERNAME }}/toon-kids-anchor-preflight-${{ github.run_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Kaggle credentials
+        shell: bash
+        run: |
+          test -n "$KAGGLE_USERNAME" || { echo "❌ Missing KAGGLE_USERNAME"; exit 1; }
+          test -n "$KAGGLE_KEY" || { echo "❌ Missing KAGGLE_KEY"; exit 1; }
+          echo "✅ Kaggle credentials found"
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --upgrade kaggle
+
+      - name: Prepare no-Wan preflight kernel
+        shell: bash
+        run: |
+          rm -rf kaggle_kernel
+          mkdir -p kaggle_kernel/src
+          cp tools/kaggle_wan_anchor_preflight.py kaggle_kernel/generate_anchors.py
+          cp src/toon_kids_story.py kaggle_kernel/src/toon_kids_story.py
+          cp story_history.json kaggle_kernel/story_history.json
+          cat > kaggle_kernel/kernel-metadata.json <<EOF
+          {
+            "id": "${KAGGLE_KERNEL}",
+            "title": "Toon Kids Anchor Preflight ${GITHUB_RUN_ID}",
+            "code_file": "generate_anchors.py",
+            "language": "python",
+            "kernel_type": "script",
+            "is_private": "false",
+            "enable_gpu": "true",
+            "enable_internet": "true",
+            "machine_shape": "NvidiaTeslaT4",
+            "dataset_sources": [],
+            "competition_sources": [],
+            "kernel_sources": [],
+            "model_sources": []
+          }
+          EOF
+          echo "Prepared safe preflight kernel"; find kaggle_kernel -maxdepth 2 -type f -print
+
+      - name: Push and run anchor preflight on Kaggle T4
+        run: kaggle kernels push -p kaggle_kernel
+
+      - name: Wait for anchor package with live failure detection
+        shell: bash
+        run: |
+          rm -rf kaggle_output
+          mkdir -p kaggle_output
+          for i in $(seq 1 80); do
+            echo "--- Kaggle poll $i/80 ---"
+            rm -rf kaggle_output/*
+            if kaggle kernels output "$KAGGLE_KERNEL" -p kaggle_output --force 2>&1; then
+              find kaggle_output -maxdepth 3 -type f -printf '%p %s bytes\n' || true
+            else
+              echo "⚠️ Kaggle output command returned non-zero; inspecting available logs..."
+            fi
+
+            LOG=$(find kaggle_output -type f -name '*.log' | head -n 1 || true)
+            if [ -n "$LOG" ]; then
+              echo "📋 Latest Kaggle log: $LOG"
+              if grep -Eqi 'Traceback|CUDA out of memory|RuntimeError|ModuleNotFoundError|ImportError|No space left|Killed|Exception:|ERROR:' "$LOG"; then
+                echo "❌ Kaggle kernel appears to have failed. Relevant log excerpt:"
+                grep -Ein -C 3 'Traceback|CUDA out of memory|RuntimeError|ModuleNotFoundError|ImportError|No space left|Killed|Exception:|ERROR:' "$LOG" | tail -n 80 || true
+                exit 1
+              fi
+              echo "✅ No fatal error signature detected yet"
+            fi
+
+            if find kaggle_output -type f -name 'anchors_contact_sheet.jpg' | grep -q .; then
+              echo "✅ Anchor preflight returned"
+              exit 0
+            fi
+            sleep 60
+          done
+          echo "❌ Kaggle did not return the anchor package within 80 minutes"
+          echo "Final available output:"
+          find kaggle_output -maxdepth 3 -type f -printf '%p %s bytes\n' || true
+          exit 1
+
+      - name: Verify anchor package — no video accepted
+        shell: bash
+        run: |
+          SHEET=$(find kaggle_output -type f -name 'anchors_contact_sheet.jpg' | head -n 1)
+          REF=$(find kaggle_output -type f -name 'character_reference.png' | head -n 1)
+          test -n "$SHEET" || { echo "❌ Contact sheet missing"; exit 1; }
+          test -n "$REF" || { echo "❌ Character reference missing"; exit 1; }
+          COUNT=$(find kaggle_output -type f -name 'anchor_*.png' | wc -l)
+          test "$COUNT" -eq 7 || { echo "❌ Expected 7 anchors, got $COUNT"; exit 1; }
+          echo "✅ 1 character reference + 7 scene anchors ready for review"
+          echo "🛡️ This workflow contains no Wan model and produces no video."
+          cp "$SHEET" anchors_contact_sheet.jpg
+          cp "$REF" character_reference.png
+          find kaggle_output -type f -name 'anchor_*.png' -exec cp {} . \;
+
+      - name: Upload visual review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toon-kids-wan-v2-anchor-review
+          path: |
+            anchors_contact_sheet.jpg
+            character_reference.png
+            anchor_*.png
+          if-no-files-found: error
+          retention-days: 7
