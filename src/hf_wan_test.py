@@ -33,11 +33,15 @@ def main():
     print(f"Connecting to Hugging Face Space: {SPACE}")
     client = Client(SPACE, token=HF_TOKEN)
     print("Submitting 3-second portrait Wan 2.2 generation...")
+
+    # The Space's current public API uses height/width/duration_seconds,
+    # not the older aspect_ratio/duration_input parameters.
     result = client.predict(
         input_image=handle_file(str(image_path)),
         prompt=prompt,
-        aspect_ratio="480x832",
-        duration_input=3,
+        height=832,
+        width=480,
+        duration_seconds=3,
         api_name="/generate_video",
     )
 
