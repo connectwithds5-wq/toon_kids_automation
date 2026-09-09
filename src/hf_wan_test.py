@@ -11,6 +11,33 @@ HF_TOKEN = os.getenv("HF_TOKEN") or None
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_test.mp4"))
 
 
+def _extract_video_path(result):
+    """Normalize common Gradio return shapes to a local video filepath."""
+    if isinstance(result, dict):
+        # Current Space returns: {"video": "/tmp/.../video.mp4"}
+        for key in ("video", "output", "file", "path"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                return value
+        raise RuntimeError(f"Hugging Face returned a dict without a video path: {result!r}")
+
+    if isinstance(result, (tuple, list)):
+        # Handle both [path] and [(path, metadata)] style responses.
+        for item in result:
+            try:
+                path = _extract_video_path(item)
+                if path:
+                    return path
+            except RuntimeError:
+                continue
+        raise RuntimeError(f"Hugging Face returned no video path in: {result!r}")
+
+    if isinstance(result, str) and result:
+        return result
+
+    raise RuntimeError(f"Hugging Face returned an unsupported result: {result!r}")
+
+
 def main():
     WORK.mkdir(exist_ok=True)
     history = load_history()
@@ -45,12 +72,15 @@ def main():
         api_name="/generate_video",
     )
 
-    video_path = result[0] if isinstance(result, (tuple, list)) else result
-    if not video_path:
-        raise RuntimeError(f"Hugging Face returned no video: {result!r}")
+    print(f"HF result: {result!r}")
+    video_path = _extract_video_path(result)
 
-    print(f"HF result: {video_path}")
-    shutil.copy2(video_path, OUT)
+    source = Path(video_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Hugging Face returned a video path that does not exist: {source}")
+
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, OUT)
     print(f"OK: {OUT} ({OUT.stat().st_size} bytes)")
 
 
