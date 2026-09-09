@@ -12,6 +12,7 @@ subprocess.check_call([
     sys.executable, "-m", "pip", "install", "-q",
     "diffusers>=0.36.0", "transformers>=4.49.0", "accelerate>=1.5.0",
     "imageio[ffmpeg]", "edge-tts", "pillow",
+    "google-genai", "google-api-python-client", "google-auth",
 ])
 
 import torch
@@ -47,7 +48,7 @@ def ffmpeg(args):
 
 async def make_voice(text: str, path: Path):
     import edge_tts
-    await edge_tts.Communicate("" if not text else text, "hi-IN-MadhurNeural", rate="+6%", volume="+0%").save(str(path))
+    await edge_tts.Communicate(text or "", "hi-IN-MadhurNeural", rate="+6%", volume="+0%").save(str(path))
 
 
 def make_music(path: Path, seconds: float):
@@ -87,7 +88,7 @@ def main():
         portrait = OUT / f"scene_{idx:02d}.mp4"
         voice = OUT / f"voice_{idx:02d}.mp3"
 
-        # FIX: every scene has its own story-aware anchor instead of reusing one still.
+        # Every scene gets a different deterministic anchor from the story engine.
         scene_image(story, scene, i, anchor)
         portrait_img = Image.open(anchor).convert("RGB")
         model_img = portrait_img.rotate(90, expand=True).resize((MODEL_WIDTH, MODEL_HEIGHT), Image.LANCZOS)
