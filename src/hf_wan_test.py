@@ -30,29 +30,18 @@ def main():
         "high quality animated film style, no text, no subtitles, no watermark."
     )[:600]
 
-    negative_prompt = (
-        "text, subtitles, watermark, logo, distorted face, extra limbs, "
-        "flicker, blurry, low quality, deformed"
-    )
-
     print(f"Connecting to Hugging Face Space: {SPACE}")
     client = Client(SPACE, token=HF_TOKEN)
     print("Submitting 3-second portrait Wan 2.2 generation...")
 
-    # Current Space API is positional and expects:
-    # image, prompt, height, width, negative_prompt, duration_seconds,
-    # guidance_scale, num_inference_steps, seed, randomize_seed.
+    # The live Space exposes a simplified API. It expects the aspect-ratio
+    # choice string, not raw height/width values.
+    # Portrait is exactly the public choice "480x832".
     result = client.predict(
         handle_file(str(image_path)),
         prompt,
-        832,
-        480,
-        negative_prompt,
+        "480x832",
         3,
-        5.0,
-        4,
-        42,
-        False,
         api_name="/generate_video",
     )
 
