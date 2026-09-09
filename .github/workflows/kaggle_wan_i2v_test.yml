@@ -1,0 +1,96 @@
+name: Toon Kids - Wan I2V Quality Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wan-i2v-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_KERNEL: ${{ secrets.KAGGLE_USERNAME }}/toon-kids-wan-i2v-${{ github.run_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Kaggle credentials
+        shell: bash
+        run: |
+          test -n "$KAGGLE_USERNAME" || { echo "Missing KAGGLE_USERNAME"; exit 1; }
+          test -n "$KAGGLE_KEY" || { echo "Missing KAGGLE_KEY"; exit 1; }
+          echo "Kaggle credentials found."
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --upgrade kaggle
+
+      - name: Prepare Kaggle Wan I2V kernel
+        shell: bash
+        run: |
+          mkdir -p kaggle_kernel
+          cp tools/kaggle_wan_i2v_production.py kaggle_kernel/generate_video.py
+          cat > kaggle_kernel/kernel-metadata.json <<EOF
+          {
+            "id": "${KAGGLE_KERNEL}",
+            "title": "Toon Kids Wan I2V ${GITHUB_RUN_ID}",
+            "code_file": "generate_video.py",
+            "language": "python",
+            "kernel_type": "script",
+            "is_private": "false",
+            "enable_gpu": "true",
+            "enable_internet": "true",
+            "machine_shape": "NvidiaTeslaT4",
+            "dataset_sources": [],
+            "competition_sources": [],
+            "kernel_sources": [],
+            "model_sources": []
+          }
+          EOF
+          cat kaggle_kernel/kernel-metadata.json
+
+      - name: Push and run on Kaggle T4
+        run: kaggle kernels push -p kaggle_kernel
+
+      - name: Wait for Wan I2V output
+        shell: bash
+        run: |
+          rm -rf kaggle_output
+          mkdir -p kaggle_output
+          for i in $(seq 1 45); do
+            echo "--- Output poll $i/45 ---"
+            rm -rf kaggle_output/*
+            if kaggle kernels output "$KAGGLE_KERNEL" -p kaggle_output --force 2>&1; then
+              find kaggle_output -maxdepth 2 -type f -print
+              if find kaggle_output -type f -name 'toon_kids_wan_i2v_test.mp4' | grep -q .; then
+                echo "Wan I2V MP4 is ready."
+                exit 0
+              fi
+            else
+              echo "Kaggle output is not ready yet."
+            fi
+            sleep 45
+          done
+          echo "Kaggle did not return the Wan I2V MP4 within the wait window."
+          exit 1
+
+      - name: Verify video
+        shell: bash
+        run: |
+          VIDEO=$(find kaggle_output -type f -name 'toon_kids_wan_i2v_test.mp4' | head -n 1)
+          test -n "$VIDEO" || { echo "No Wan I2V MP4 returned."; exit 1; }
+          cp "$VIDEO" toon_kids_wan_i2v_test.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 toon_kids_wan_i2v_test.mp4
+          ls -lh toon_kids_wan_i2v_test.mp4
+
+      - name: Upload Wan I2V test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toon-kids-wan-i2v-test
+          path: toon_kids_wan_i2v_test.mp4
+          retention-days: 5
