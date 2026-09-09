@@ -102,7 +102,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: toon-kids-wan-i2v-v2
-          path: |
-            toon_kids_wan_i2v_v2.mp4
-            kaggle_output/**/story_used.txt
+          path: toon_kids_wan_i2v_v2.mp4
+          if-no-files-found: error
           retention-days: 7
