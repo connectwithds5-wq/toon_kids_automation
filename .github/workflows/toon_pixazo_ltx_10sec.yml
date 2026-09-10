@@ -1,4 +1,4 @@
-name: Toon Kids - Gemini + Pixazo LTX Educational 10s
+name: Toon Kids - Gemini + Pixazo LTX Hindi Nursery Rhyme
 
 on:
   workflow_dispatch:
@@ -7,17 +7,18 @@ permissions:
   contents: read
 
 jobs:
-  pixazo-learning:
+  pixazo-rhyme:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 120
     env:
       PIXAZO_API_KEY: ${{ secrets.PIXAZO_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
       GEMINI_FALLBACK_MODEL: gemini-3.6-flash
+      GEMINI_TTS_MODEL: gemini-3.1-flash-tts-preview
       CONTENT_CATEGORY: numbers
-      PIXAZO_OUTPUT: toon_pixazo_ltx_10sec_learning.mp4
-      PIXAZO_METADATA: pixazo_learning_metadata.json
+      PIXAZO_OUTPUT: toon_pixazo_ltx_20sec_rhyme.mp4
+      PIXAZO_METADATA: pixazo_rhyme_metadata.json
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -49,30 +50,31 @@ jobs:
           fi
           echo "✅ PIXAZO_API_KEY present"
           echo "✅ GEMINI_API_KEY present"
-          echo "📚 Educational category: $CONTENT_CATEGORY"
-          echo "🧠 Gemini: $GEMINI_TEXT_MODEL"
+          echo "🎵 Format: original Hindi nursery rhyme"
+          echo "🧠 Gemini text: $GEMINI_TEXT_MODEL"
+          echo "🎤 Gemini TTS: $GEMINI_TTS_MODEL"
 
-      - name: Validate educational pipeline
+      - name: Validate rhyme pipeline
         run: |
           python -m py_compile src/pixazo_ltx_10sec_story_av.py src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py
           echo "✅ Python syntax OK"
 
-      - name: Generate 1-10 counting video with Gemini + Pixazo
+      - name: Generate Hindi counting rhyme with Gemini + Pixazo
         run: python src/pixazo_ltx_10sec_story_av.py
 
-      - name: Verify final media and learning metadata
+      - name: Verify final rhyme media
         run: |
-          test -s toon_pixazo_ltx_10sec_learning.mp4
-          test -s pixazo_learning_metadata.json
-          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_pixazo_ltx_10sec_learning.mp4
-          echo "----- GEMINI LEARNING PLAN -----"
-          cat pixazo_learning_metadata.json
+          test -s toon_pixazo_ltx_20sec_rhyme.mp4
+          test -s pixazo_rhyme_metadata.json
+          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_pixazo_ltx_20sec_rhyme.mp4
+          echo "----- GEMINI RHYME PLAN -----"
+          cat pixazo_rhyme_metadata.json
 
-      - name: Upload video + learning metadata
+      - name: Upload rhyme video + metadata
         uses: actions/upload-artifact@v4
         with:
-          name: toon-kids-1-to-10-pixazo-test
+          name: toon-kids-hindi-counting-rhyme-test
           path: |
-            toon_pixazo_ltx_10sec_learning.mp4
-            pixazo_learning_metadata.json
+            toon_pixazo_ltx_20sec_rhyme.mp4
+            pixazo_rhyme_metadata.json
           retention-days: 3
