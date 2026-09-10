@@ -13,10 +13,12 @@ from toon_kids_story import WORK, local_story, load_history, scene_image
 SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_10sec_story_av.mp4"))
-CLIP_SECONDS = 3.5
+CLIP_SECONDS = 10.0 / 3.0
 FINAL_SECONDS = 10.0
 FPS = 16
 W, H = 1080, 1920
+SCENES = 3
+TTS_RATE = os.getenv("TTS_RATE", "-6%")
 
 
 def extract_video_path(result):
@@ -46,26 +48,28 @@ def make_clip(client, story, scene, index):
     scene_image(story, scene, index, image_path)
 
     prompt = (
-        "High quality 3D cartoon children's animation. Keep the EXACT same main character "
-        "design, colors, clothes, face and proportions as the input image. "
-        f"Character: {story.get('character', 'cute cartoon animal')}. "
-        f"Scene action: {scene.get('visual', '')}. "
-        f"Camera: {scene.get('camera', 'gentle cinematic movement')}. "
-        "Cute expressive movement, natural body motion, stable face, stable anatomy, "
-        "smooth cinematic animation, bright colorful children's movie look, clean background, "
-        "no text, no letters, no subtitles, no logo, no watermark."
-    )[:900]
+        "High quality preschool 3D cartoon animation. Preserve the input character EXACTLY: "
+        "same species, face, eyes, body proportions, skin color, clothing, hat, scarf and colors. "
+        "Do not redesign or add accessories. Keep the character centered and recognizable. "
+        f"Character reference: {story.get('character', 'cute cartoon animal')}. "
+        f"Action: {scene.get('visual', '')}. Camera: {scene.get('camera', 'very gentle cinematic push in')}. "
+        "Slow gentle movement, natural child-friendly motion, stable anatomy, stable face, "
+        "stable clothing, smooth motion, bright colorful children's movie style. "
+        "Avoid fast motion, sudden pose changes, morphing and camera shake. "
+        "No text, letters, captions, subtitles, logos, watermarks or UI elements."
+    )[:950]
     negative = (
+        "text, letters, words, subtitles, caption, logo, watermark, badge, label, UI, "
         "blurry, low quality, out of focus, distorted face, deformed body, extra limbs, "
         "missing limbs, bad anatomy, duplicate character, character morphing, face morphing, "
-        "flicker, jitter, frame tearing, unstable clothing, unstable colors, text, letters, "
-        "subtitles, logo, watermark, rectangle artifact, gray frame, noisy image"
+        "identity change, clothing change, hat change, scarf change, color change, flicker, jitter, "
+        "frame tearing, camera shake, rapid motion, fast movement, object duplication, artifact"
     )
 
-    print(f"[Scene {index + 1}/3] Wan 2.2 {CLIP_SECONDS}s")
+    print(f"[Scene {index + 1}/{SCENES}] Wan 2.2 {CLIP_SECONDS:.3f}s, slow-motion prompt")
     result = client.predict(
         handle_file(str(image_path)), prompt, 6, negative, CLIP_SECONDS,
-        1.0, 1.0, 2000 + index, False, api_name="/generate_video"
+        1.0, 1.0, 5000 + index, False, api_name="/generate_video"
     )
     source = Path(extract_video_path(result))
     if not source.is_file():
@@ -88,50 +92,49 @@ def write_wav(path, samples, rate=44100):
 
 
 def make_music(path, seconds=10.0, rate=44100):
-    """Tiny original, royalty-free children's bed: soft chords + melody + pulse."""
+    """Original soft kids music bed with gentle arpeggio and bell-like melody."""
     import math
     total = int(seconds * rate)
-    notes = [261.63, 329.63, 392.00, 523.25, 392.00, 329.63, 293.66, 349.23]
     chords = [(261.63, 329.63, 392.00), (220.00, 277.18, 329.63),
               (246.94, 311.13, 369.99), (196.00, 246.94, 293.66)]
+    melody = [523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 493.88]
     out = []
     for i in range(total):
         t = i / rate
         chord = chords[int(t / 2.5) % len(chords)]
         pad = sum(math.sin(2 * math.pi * f * t) for f in chord) / 3.0
-        beat = math.sin(2 * math.pi * 2.0 * t) * (0.08 if (t % 0.5) < 0.08 else 0.0)
-        melody_t = t % 4.0
-        n = notes[int(melody_t / 0.5) % len(notes)]
-        env = max(0.0, 1.0 - ((melody_t % 0.5) / 0.5)) ** 2
-        melody = math.sin(2 * math.pi * n * t) * 0.12 * env
-        fade = min(1.0, t / 0.4, (seconds - t) / 0.6)
-        out.append((0.16 * pad + beat + melody) * max(0.0, fade))
+        beat_phase = t % 0.5
+        pulse = math.sin(2 * math.pi * 90 * beat_phase) * 0.025 * max(0.0, 1.0 - beat_phase / 0.16)
+        mt = t % 2.0
+        note = melody[int(mt / 0.25) % len(melody)]
+        note_phase = mt % 0.25
+        bell_env = math.exp(-8.0 * note_phase)
+        bell = (math.sin(2 * math.pi * note * t) + 0.25 * math.sin(2 * math.pi * note * 2 * t)) * 0.055 * bell_env
+        fade = min(1.0, t / 0.5, (seconds - t) / 0.8)
+        out.append((0.105 * pad + pulse + bell) * max(0.0, fade))
     write_wav(path, out, rate)
 
 
-def tone(duration, freq, path, volume=0.28, rate=44100, sweep=0.0):
+def make_sfx(path, kind):
     import math
+    rate = 44100
+    duration = {"chime": 0.50, "whoosh": 0.42, "sparkle": 0.40, "pop": 0.20}.get(kind, 0.30)
     count = int(duration * rate)
     samples = []
     for i in range(count):
         t = i / rate
-        f = freq + sweep * t
-        env = min(1.0, t / 0.02, (duration - t) / 0.08)
-        samples.append(math.sin(2 * math.pi * f * t) * volume * max(0.0, env))
+        if kind == "whoosh":
+            phase = 2 * math.pi * (120 * t + 700 * t * t)
+            value = math.sin(phase) * (0.12 + 0.08 * math.sin(2 * math.pi * 7 * t))
+        elif kind == "sparkle":
+            value = (math.sin(2 * math.pi * 1320 * t) + 0.45 * math.sin(2 * math.pi * 1980 * t)) * 0.10
+        elif kind == "chime":
+            value = (math.sin(2 * math.pi * 880 * t) + 0.35 * math.sin(2 * math.pi * 1320 * t)) * 0.13
+        else:
+            value = math.sin(2 * math.pi * (220 + 420 * t) * t) * 0.16
+        env = min(1.0, t / 0.015, (duration - t) / 0.10)
+        samples.append(value * max(0.0, env))
     write_wav(path, samples, rate)
-
-
-def make_sfx(path, kind):
-    if kind == "chime":
-        tone(0.55, 880, path, 0.30, sweep=240)
-    elif kind == "whoosh":
-        tone(0.45, 180, path, 0.20, sweep=900)
-    elif kind == "sparkle":
-        tone(0.35, 1320, path, 0.22, sweep=700)
-    elif kind == "pop":
-        tone(0.22, 260, path, 0.30, sweep=500)
-    else:
-        tone(0.30, 440, path, 0.18)
 
 
 def sfx_kind(scene):
@@ -146,11 +149,27 @@ def sfx_kind(scene):
 
 
 async def tts(text, path):
-    await edge_tts.Communicate(text=text, voice="hi-IN-SwaraNeural", rate="+6%").save(str(path))
+    await edge_tts.Communicate(text=text, voice="hi-IN-SwaraNeural", rate=TTS_RATE).save(str(path))
 
 
 def make_tts_sync(text, path):
     asyncio.run(tts(text, path))
+
+
+def media_duration(path):
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)
+    ], capture_output=True, text=True, check=True)
+    return float(result.stdout.strip())
+
+
+def fit_voice(path, target):
+    duration = media_duration(path)
+    ratio = duration / target
+    if ratio <= 1.0:
+        return "anull"
+    speed = max(0.82, 1.0 / ratio)
+    return f"atempo={speed:.4f}"
 
 
 def concat_video(clips, path):
@@ -159,51 +178,65 @@ def concat_video(clips, path):
     subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
         "-an", "-t", str(FINAL_SECONDS), "-c:v", "libx264", "-preset", "veryfast",
-        "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path)
+        "-crf", "18", "-pix_fmt", "yuv420p", "-r", str(FPS), "-movflags", "+faststart", str(path)
     ], check=True)
 
 
 def mux_audio_video(video_path, music, narrations, sfxs, subtitles, path):
-    # Inputs: video, music, then narration/sfx pairs. Delays are scene-relative.
     cmd = ["ffmpeg", "-y", "-i", str(video_path), "-i", str(music)]
     for n, s in zip(narrations, sfxs):
         cmd += ["-i", str(n), "-i", str(s)]
 
-    filters = ["[1:a]volume=0.16[music]"]
+    filters = ["[1:a]volume=0.11[music]"]
     mix_inputs = ["[music]"]
-    for i in range(3):
+    for i in range(SCENES):
         nidx = 2 + i * 2
         sidx = nidx + 1
-        delay = int(i * 3.3 * 1000)
-        filters.append(f"[{nidx}:a]adelay={delay}|{delay},volume=1.25[n{i}]")
-        filters.append(f"[{sidx}:a]adelay={delay}|{delay},volume=0.65[s{i}]")
+        delay = int(round(i * CLIP_SECONDS * 1000))
+        voice_filter = fit_voice(narrations[i], CLIP_SECONDS)
+        filters.append(f"[{nidx}:a]{voice_filter},adelay={delay}|{delay},volume=1.0[n{i}]")
+        filters.append(f"[{sidx}:a]adelay={delay}|{delay},volume=0.42[s{i}]")
         mix_inputs += [f"[n{i}]", f"[s{i}]"]
-    filters.append("".join(mix_inputs) + f"amix=inputs={len(mix_inputs)}:duration=longest:dropout_transition=0,loudnorm=I=-16:TP=-1.5:LRA=11[aout]")
 
+    filters.append(
+        "".join(mix_inputs) +
+        f"amix=inputs={len(mix_inputs)}:duration=longest:dropout_transition=0:normalize=0," 
+        "loudnorm=I=-16:TP=-1.5:LRA=9[aout]"
+    )
+
+    subtitle_filter = subtitles.as_posix().replace("\\", "/").replace("'", "\\'")
+    # The local art historically contains a small SCENE badge in the top-left. Mask only that
+    # fixed area in the final render so old art cannot leak a blurred/garbled badge into I2V.
+    vf = (
+        f"scale={W}:{H}:flags=lanczos,"
+        "delogo=x=48:y=48:w=225:h=92:show=0,"
+        f"subtitles='{subtitle_filter}'"
+    )
     cmd += [
         "-filter_complex", ";".join(filters),
         "-map", "0:v:0", "-map", "[aout]",
-        "-vf", f"scale={W}:{H}:flags=lanczos,subtitles='{subtitles.as_posix()}'",
+        "-vf", vf,
         "-t", str(FINAL_SECONDS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
-        "-ar", "44100", "-movflags", "+faststart", str(path)
+        "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-ar", "44100",
+        "-movflags", "+faststart", str(path)
     ]
     subprocess.run(cmd, check=True)
 
 
-def make_ass(story, scenes, path):
+def make_ass(scenes, narration_files, path):
     def esc(s):
-        return str(s).replace("{", "(").replace("}", ")")
+        return str(s).replace("{", "(").replace("}", ")").replace("\\", "\\\\")
     lines = [
         "[Script Info]", "ScriptType: v4.00+", "PlayResX: 1080", "PlayResY: 1920", "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        "Style: Kids,Noto Sans Devanagari,58,&H00FFFFFF,&H00FFFFFF,&H001B263B,&H80000000,1,0,0,0,100,100,0,0,1,5,2,2,60,60,170,1",
+        "Style: Kids,Noto Sans Devanagari,58,&H00FFFFFF,&H00FFFFFF,&H001B263B,&H90000000,1,0,0,0,100,100,0,0,1,5,2,2,60,60,165,1",
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
     ]
-    for i, scene in enumerate(scenes):
-        start = i * 3.3
-        end = min(start + 3.3, FINAL_SECONDS)
+    for i, (scene, narration) in enumerate(zip(scenes, narration_files)):
+        start = i * CLIP_SECONDS
+        voice_dur = min(media_duration(narration), CLIP_SECONDS)
+        end = min(start + max(voice_dur + 0.08, 0.35), FINAL_SECONDS)
         def ts(sec):
             m = int(sec // 60); s = sec - m * 60
             return f"{m}:{s:04.1f}"
@@ -214,12 +247,12 @@ def make_ass(story, scenes, path):
 def main():
     WORK.mkdir(exist_ok=True)
     story = local_story(load_history())
-    scenes = story.get("scenes", [])[:3]
-    if len(scenes) < 3:
-        raise RuntimeError("The selected story must contain at least 3 scenes.")
+    scenes = story.get("scenes", [])[:SCENES]
+    if len(scenes) < SCENES:
+        raise RuntimeError(f"The selected story must contain at least {SCENES} scenes.")
 
     print(f"Story: {story['title']}")
-    print("Pipeline: 3 Wan clips + Hindi narration + original music + scene SFX + Hindi subtitles")
+    print(f"Pipeline: {SCENES} Wan clips + slower Hindi narration ({TTS_RATE}) + music + SFX + timed subtitles")
     client = Client(SPACE, token=HF_TOKEN)
     clips = [make_clip(client, story, scene, i) for i, scene in enumerate(scenes)]
 
@@ -235,10 +268,11 @@ def main():
         print(f"Audio scene {i + 1}: Hindi voice + {sfx_kind(scene)} SFX")
         make_tts_sync(scene.get("narration", ""), n)
         make_sfx(s, sfx_kind(scene))
-        narrations.append(n); sfxs.append(s)
+        narrations.append(n)
+        sfxs.append(s)
 
     ass = WORK / "av_subtitles.ass"
-    make_ass(story, scenes, ass)
+    make_ass(scenes, narrations, ass)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     mux_audio_video(video, music, narrations, sfxs, ass, OUT)
 
