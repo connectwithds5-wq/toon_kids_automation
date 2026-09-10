@@ -6,7 +6,9 @@ from gradio_client import Client, handle_file
 
 from toon_kids_story import WORK, local_story, load_history, scene_image
 
-SPACE = os.getenv("HF_WAN_SPACE", "alexcheng0072/wan27-free-video-generator")
+# Fast Wan 2.2 14B I2V ZeroGPU Space with Lightning LoRA.
+# It accepts an image + prompt and returns (video_path, seed).
+SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_test.mp4"))
 
@@ -14,7 +16,6 @@ OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_test.mp4"))
 def _extract_video_path(result):
     """Normalize common Gradio return shapes to a local video filepath."""
     if isinstance(result, dict):
-        # Current Space returns: {"video": "/tmp/.../video.mp4"}
         for key in ("video", "output", "file", "path"):
             value = result.get(key)
             if isinstance(value, str) and value:
@@ -22,8 +23,11 @@ def _extract_video_path(result):
         raise RuntimeError(f"Hugging Face returned a dict without a video path: {result!r}")
 
     if isinstance(result, (tuple, list)):
-        # Handle both [path] and [(path, metadata)] style responses.
         for item in result:
+            if isinstance(item, str) and item:
+                # The Space returns (video_path, seed); don't treat the seed as a path.
+                if item.endswith((".mp4", ".webm", ".mov", ".mkv")) or Path(item).is_file():
+                    return item
             try:
                 path = _extract_video_path(item)
                 if path:
@@ -57,18 +61,29 @@ def main():
         "high quality animated film style, no text, no subtitles, no watermark."
     )[:600]
 
+    negative_prompt = (
+        "static, blurry, low quality, distorted face, deformed body, extra limbs, "
+        "bad hands, flicker, jitter, text, subtitles, watermark, gray image, "
+        "duplicate character, messy background"
+    )
+
     print(f"Connecting to Hugging Face Space: {SPACE}")
     client = Client(SPACE, token=HF_TOKEN)
-    print("Submitting 3-second portrait Wan 2.2 generation...")
+    print("Submitting 3.5-second portrait Wan 2.2 14B I2V generation (6-step Lightning)...")
 
-    # The live Space exposes a simplified API. It expects the aspect-ratio
-    # choice string, not raw height/width values.
-    # Portrait is exactly the public choice "480x832".
+    # Current Space API: generate_video(image, prompt, steps, negative_prompt,
+    # duration_seconds, guidance_scale, guidance_scale_2, seed, randomize_seed).
+    # The Space automatically resizes portrait inputs to a supported resolution.
     result = client.predict(
         handle_file(str(image_path)),
         prompt,
-        "480x832",
-        3,
+        6,
+        negative_prompt,
+        3.5,
+        1.0,
+        1.0,
+        42,
+        True,
         api_name="/generate_video",
     )
 
