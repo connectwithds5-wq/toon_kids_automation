@@ -1,34 +1,152 @@
 import asyncio
+import json
 import os
 import time
 from pathlib import Path
 
 import requests
 import edge_tts
+from google import genai
+from google.genai import types
 
-from toon_kids_story import WORK, local_story, load_history
+from toon_kids_story import WORK, choose_topic, load_history
 from hf_wan_10sec_story_av_v2 import assemble, mux, make_music, make_sfx, fit_voice, make_ass, sfx_kind
 
-API_KEY = os.getenv("PIXAZO_API_KEY", "").strip()
+PIXAZO_KEY = os.getenv("PIXAZO_API_KEY", "").strip()
+GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash-lite")
+GEMINI_FALLBACK = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.6-flash")
 OUT = Path(os.getenv("PIXAZO_OUTPUT", "toon_pixazo_ltx_10sec_story_av.mp4"))
+META = Path(os.getenv("PIXAZO_METADATA", "pixazo_story_metadata.json"))
 SLOTS = [3.25, 3.35, 3.40]
 API_BASE = "https://gateway.pixazo.ai"
 
 
+CINEMATIC_BIBLE = """
+Premium 3D animated-feature-quality children's cartoon, cute expressive characters,
+soft physically believable lighting, rich colorful environment, polished fur/feathers,
+cinematic depth of field, clean composition, smooth natural motion.
+Keep the SAME main character, face, body proportions, colors and outfit in every scene.
+Keep the SAME location and visual world unless the story explicitly requires a small nearby reveal.
+Vertical 9:16 composition, subject readable in the center safe area, no text or UI.
+Use purposeful camera language, not random zooming. Prefer establishing wides and medium shots;
+use close-ups only when an emotion or important object needs emphasis.
+"""
+
+NEGATIVE = (
+    "blurry, low quality, distorted face, deformed body, extra limbs, bad anatomy, "
+    "duplicate character, character morphing, face morphing, flicker, jitter, unstable clothing, "
+    "unstable colors, random camera shake, extreme unwanted zoom, fisheye distortion, "
+    "cropped head, cropped ears, subject out of frame, text, letters, subtitles, logo, watermark, "
+    "horror, scary, violence, dark disturbing mood"
+)
+
+
+def gemini_story():
+    if not GEMINI_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+
+    history = load_history()
+    old_titles = []
+    for item in history[-30:]:
+        if isinstance(item, dict) and item.get("title"):
+            old_titles.append(item["title"])
+        elif isinstance(item, str):
+            old_titles.append(item[:100])
+
+    topic = choose_topic(history)
+    prompt = f"""
+You are a senior Hindi children's YouTube storyteller AND cinematic animation director.
+Create one original story designed specifically for a 10-second vertical 9:16 AI video test.
+Topic seed: {topic}
+Avoid repeating these previous titles: {json.dumps(old_titles, ensure_ascii=False)}
+
+The final video has EXACTLY 3 scenes, about 3.3 seconds each.
+The story must have a clear mini arc: HOOK -> DISCOVERY/ACTION -> PAYOFF/EMOTIONAL END.
+Use one main character consistently. The visual action must be physically simple enough for an AI video model.
+
+CAMERA DIRECTION IS CRITICAL. For each scene explicitly choose a cinematic shot such as:
+- Scene 1: wide establishing shot / high-angle or gentle aerial reveal that clearly shows the world.
+- Scene 2: medium tracking shot, over-the-shoulder, low-angle or side dolly following the action.
+- Scene 3: cinematic medium-to-close emotional payoff or wide hero reveal.
+Do NOT make every scene a face close-up. Do NOT use generic 'zoom in'.
+Include camera movement, framing, lens feel, subject motion, foreground/background depth, and lighting.
+
+Return ONLY valid JSON with this schema:
+{{
+  "title": "short catchy Hindi title",
+  "topic": "one-line Hindi story premise",
+  "moral": "short positive lesson",
+  "character": "fixed detailed character appearance including colors and outfit",
+  "world": "fixed detailed location/environment",
+  "scenes": [
+    {{
+      "narration": "12-18 simple Hindi words",
+      "visual": "specific physical action, environment and emotion",
+      "camera": "specific cinematic shot + camera movement + framing",
+      "lighting": "specific cinematic lighting",
+      "transition": "how this scene naturally leads into the next"
+    }}
+  ]
+}}
+
+Rules:
+- Exactly 3 scenes.
+- Preschool-friendly, wholesome, funny/warm, visually beautiful.
+- Scene 1 must grab attention immediately without a close-up-only composition.
+- Scene 2 must visibly advance the story.
+- Scene 3 must deliver a satisfying cute payoff and moral feeling.
+- Same character, outfit, colors and world across all 3 scenes.
+- Avoid crowds and complicated interactions; maximum 2 visible characters at once.
+- No written words, signs, captions, logos or watermarks inside the generated video.
+"""
+
+    last_error = None
+    client = genai.Client(api_key=GEMINI_KEY)
+    for model in [GEMINI_MODEL, GEMINI_FALLBACK]:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.9,
+                    response_mime_type="application/json",
+                ),
+            )
+            data = json.loads(response.text)
+            scenes = data.get("scenes", [])
+            if len(scenes) != 3:
+                raise ValueError(f"Gemini returned {len(scenes)} scenes instead of 3")
+            data["character"] = str(data.get("character", "cute cartoon animal"))
+            data["world"] = str(data.get("world", "bright magical forest"))
+            data["moral"] = str(data.get("moral", "मिल-जुलकर मदद करना सबसे अच्छा है।"))
+            for scene in scenes:
+                scene.setdefault("narration", "")
+                scene.setdefault("visual", "")
+                scene.setdefault("camera", "cinematic medium tracking shot")
+                scene.setdefault("lighting", "soft warm cinematic light")
+                scene.setdefault("transition", "natural continuous movement")
+            print(f"🧠 Gemini story generated with {model}: {data['title']}")
+            return data
+        except Exception as exc:
+            last_error = exc
+            print(f"⚠️ Gemini model {model} failed: {exc}")
+            time.sleep(1)
+    raise RuntimeError(f"Gemini story generation failed: {last_error}")
+
+
 def pixazo_request(prompt, index):
-    if not API_KEY:
+    if not PIXAZO_KEY:
         raise RuntimeError("PIXAZO_API_KEY is not set")
 
-    # Current Pixazo FREE LTX 2.5 endpoint.
     url = f"{API_BASE}/ltx-video/v1/text-to-video"
     headers = {
         "Content-Type": "application/json",
-        "Ocp-Apim-Subscription-Key": API_KEY,
+        "Ocp-Apim-Subscription-Key": PIXAZO_KEY,
     }
-    # 81 frames at 24fps = 3.375s, close to each 3.2-3.4s timeline slot.
     payload = {
         "prompt": prompt,
-        "negative": "blurry, low quality, distorted face, deformed body, extra limbs, bad anatomy, duplicate character, character morphing, face morphing, flicker, jitter, unstable clothing, unstable colors, text, letters, subtitles, logo, watermark",
+        "negative": NEGATIVE,
         "aspect": "9:16",
         "num_frames": 81,
         "frame_rate": 24,
@@ -40,7 +158,6 @@ def pixazo_request(prompt, index):
     if r.status_code >= 400:
         raise RuntimeError(f"Pixazo HTTP {r.status_code}: {r.text[:1500]}")
     data = r.json()
-
     request_id = data.get("request_id") if isinstance(data, dict) else None
     polling_url = data.get("polling_url") if isinstance(data, dict) else None
     if not request_id:
@@ -49,15 +166,12 @@ def pixazo_request(prompt, index):
     status_url = polling_url or f"{API_BASE}/v2/requests/status/{request_id}"
     print(f"   request_id={request_id}")
 
-    # Pixazo's FREE queue can take longer than 10 minutes. The previous
-    # 120 x 5s loop caused a false timeout while the API was still PROCESSING.
-    # Allow up to 25 minutes per scene before declaring a real timeout.
     max_polls = 300
     for poll_no in range(1, max_polls + 1):
         time.sleep(5)
         sr = requests.get(
             status_url,
-            headers={"Ocp-Apim-Subscription-Key": API_KEY},
+            headers={"Ocp-Apim-Subscription-Key": PIXAZO_KEY},
             timeout=45,
         )
         if sr.status_code >= 400:
@@ -76,7 +190,6 @@ def pixazo_request(prompt, index):
             if isinstance(media, str):
                 return media
             raise RuntimeError(f"Pixazo completed without media URL: {sd}")
-
         if status in ("ERROR", "FAILED", "CANCELLED"):
             raise RuntimeError(f"Pixazo generation failed: {sd}")
 
@@ -92,14 +205,24 @@ def download(url, path):
         raise RuntimeError(f"Downloaded Pixazo file looks invalid: {path}")
 
 
-def scene_prompt(story, scene):
+def scene_prompt(story, scene, index):
+    shot_plan = [
+        "ESTABLISHING SHOT: start with a beautiful wide/high-angle view of the environment, then a gentle cinematic crane/drone-like reveal toward the character. Show foreground depth, full body and surroundings. Do not start with a face close-up.",
+        "ACTION SHOT: use a smooth medium side-tracking/dolly shot following the character's physical action. Keep the character fully readable, with layered foreground and background parallax. Brief over-the-shoulder feeling is okay, but avoid extreme close-up.",
+        "PAYOFF SHOT: use a cinematic medium shot that can gently push toward the emotional moment, then finish with a small hero reveal/wider composition. Keep both character and environment visible and stable."
+    ][index]
     return (
-        "Premium polished 3D children's cartoon animation for a Hindi kids story. "
-        "Use one consistent cute main character for this scene. Do not add text, subtitles, logos or watermarks. "
-        f"Main character: {story.get('character', 'cute cartoon animal')}. "
-        f"Scene action: {scene.get('visual', '')}. "
-        f"Camera: {scene.get('camera', 'gentle cinematic camera movement')}. "
-        "Bright colorful family-friendly animated-film look, stable anatomy, smooth natural motion, expressive face, vertical 9:16 social-video composition."
+        f"{CINEMATIC_BIBLE}\n"
+        f"FIXED CHARACTER: {story.get('character', '')}\n"
+        f"FIXED WORLD: {story.get('world', '')}\n"
+        f"STORY TITLE: {story.get('title', '')}\n"
+        f"SCENE {index + 1} ACTION: {scene.get('visual', '')}\n"
+        f"CAMERA DIRECTOR NOTE: {scene.get('camera', '')}\n"
+        f"SHOT PLAN: {shot_plan}\n"
+        f"LIGHTING: {scene.get('lighting', '')}\n"
+        f"TRANSITION CONTINUITY: {scene.get('transition', '')}\n"
+        "Motion should be smooth, deliberate and physically plausible. Preserve character identity throughout the shot. "
+        "No text, subtitles, logos or watermarks."
     )
 
 
@@ -109,16 +232,22 @@ async def tts(text, path):
 
 def main():
     WORK.mkdir(exist_ok=True)
-    story = local_story(load_history())
-    scenes = story.get("scenes", [])[:3]
-    if len(scenes) < 3:
-        raise RuntimeError("Need at least 3 scenes")
+    if not GEMINI_KEY:
+        raise RuntimeError("GEMINI_API_KEY secret is required for the cinematic Gemini pipeline")
+    if not PIXAZO_KEY:
+        raise RuntimeError("PIXAZO_API_KEY secret is required")
+
+    story = gemini_story()
+    scenes = story["scenes"]
     print(f"📖 {story['title']}")
+    print(f"💡 Moral: {story['moral']}")
+
+    META.write_text(json.dumps(story, ensure_ascii=False, indent=2), encoding="utf-8")
 
     clips = []
     for i, scene in enumerate(scenes):
         raw = WORK / f"pixazo_clip_raw_{i}.mp4"
-        url = pixazo_request(scene_prompt(story, scene), i)
+        url = pixazo_request(scene_prompt(story, scene, i), i)
         download(url, raw)
         clips.append(raw)
 
@@ -142,7 +271,8 @@ def main():
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     mux(video, music, voices, sfxs, ass, OUT)
-    print(f"✅ Pixazo final video: {OUT}")
+    print(f"✅ Pixazo + Gemini final video: {OUT}")
+    print(f"📝 Story metadata: {META}")
 
 
 if __name__ == "__main__":
