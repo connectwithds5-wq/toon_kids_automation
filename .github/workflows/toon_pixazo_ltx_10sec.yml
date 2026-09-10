@@ -1,4 +1,4 @@
-name: Toon Story - Gemini + Pixazo LTX Cinematic Test
+name: Toon Kids - Gemini + Pixazo LTX Educational 10s
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 jobs:
-  pixazo-story:
+  pixazo-learning:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
@@ -15,8 +15,9 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
       GEMINI_FALLBACK_MODEL: gemini-3.6-flash
-      PIXAZO_OUTPUT: toon_pixazo_ltx_10sec_story_av.mp4
-      PIXAZO_METADATA: pixazo_story_metadata.json
+      CONTENT_CATEGORY: numbers
+      PIXAZO_OUTPUT: toon_pixazo_ltx_10sec_learning.mp4
+      PIXAZO_METADATA: pixazo_learning_metadata.json
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -48,28 +49,30 @@ jobs:
           fi
           echo "✅ PIXAZO_API_KEY present"
           echo "✅ GEMINI_API_KEY present"
+          echo "📚 Educational category: $CONTENT_CATEGORY"
+          echo "🧠 Gemini: $GEMINI_TEXT_MODEL"
 
-      - name: Validate cinematic pipeline
+      - name: Validate educational pipeline
         run: |
           python -m py_compile src/pixazo_ltx_10sec_story_av.py src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py
           echo "✅ Python syntax OK"
 
-      - name: Generate Gemini story + cinematic Pixazo video
+      - name: Generate 1-10 counting video with Gemini + Pixazo
         run: python src/pixazo_ltx_10sec_story_av.py
 
-      - name: Verify final media and story metadata
+      - name: Verify final media and learning metadata
         run: |
-          test -s toon_pixazo_ltx_10sec_story_av.mp4
-          test -s pixazo_story_metadata.json
-          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_pixazo_ltx_10sec_story_av.mp4
-          echo "----- GEMINI STORY -----"
-          cat pixazo_story_metadata.json
+          test -s toon_pixazo_ltx_10sec_learning.mp4
+          test -s pixazo_learning_metadata.json
+          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_pixazo_ltx_10sec_learning.mp4
+          echo "----- GEMINI LEARNING PLAN -----"
+          cat pixazo_learning_metadata.json
 
-      - name: Upload video + story metadata
+      - name: Upload video + learning metadata
         uses: actions/upload-artifact@v4
         with:
-          name: toon-gemini-pixazo-cinematic-test
+          name: toon-kids-1-to-10-pixazo-test
           path: |
-            toon_pixazo_ltx_10sec_story_av.mp4
-            pixazo_story_metadata.json
+            toon_pixazo_ltx_10sec_learning.mp4
+            pixazo_learning_metadata.json
           retention-days: 3
