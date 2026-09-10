@@ -19,7 +19,7 @@ from toon_kids_story import WORK, load_history, is_duplicate, story_text, draw_c
 SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash-lite")
+TEXT_MODEL = (os.getenv("GEMINI_TEXT_MODEL") or "gemini-2.5-flash-lite").strip()
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_gemini_wan_production.mp4"))
 SCENES = 4
 SCENE_SECONDS = 4.5
@@ -76,13 +76,13 @@ Return ONLY valid JSON with:
  "setting":"rich recurring environment",
  "moral":"short positive lesson",
  "scenes":[
-  {{"narration":"8-11 natural spoken Hindi words", "visual":"specific visible action and scenery", "camera":"slow cinematic camera move", "emotion":"emotion", "sfx":"one sound cue"}}
+  {{"narration":"7-9 natural spoken Hindi words", "visual":"specific visible action and scenery", "camera":"slow cinematic camera move", "emotion":"emotion", "sfx":"one sound cue"}}
  ]
 }}
 
-Timing rules: every narration must comfortably fit about 3.2-3.8 seconds at normal Hindi speech. Do NOT make sentences long.
+Timing rules: every narration must comfortably fit about 2.8-3.6 seconds at normal Hindi speech. Never use filler words or long clauses. Keep each line short enough to finish before the scene's SFX.
 Visual rules: describe concrete scenery, foreground/background depth, lighting, props and character action. Each scene must visibly change while preserving the same character.
-Audio rules: one clear SFX per scene, never overlapping dialogue. Scene 1 hook, scene 2 discovery, scene 3 action, scene 4 payoff + moral.
+Audio rules: one clear SFX per scene, placed AFTER the narration as a punctuation beat, never underneath dialogue. Scene 1 hook, scene 2 discovery, scene 3 action, scene 4 payoff + moral.
 Avoid these previous titles: {json.dumps(old, ensure_ascii=False)}
 """
     client = genai.Client(api_key=GEMINI_KEY)
@@ -108,18 +108,14 @@ def rich_scene(story, scene, index, path):
     ]
     sky, ground, sun = palettes[index % len(palettes)]
     d.rectangle((0, 0, W, H), fill=sky)
-    # soft sun and distant clouds
     d.ellipse((760, 120, 1010, 370), fill=sun)
     for x, y in [(80, 240), (420, 180), (680, 310)]:
         d.ellipse((x, y, x+180, y+80), fill="white")
         d.ellipse((x+45, y-45, x+220, y+75), fill="white")
-    # distant hills and middle ground
     d.ellipse((-320, 980, 720, 1690), fill="#91D89A")
     d.ellipse((390, 1030, 1370, 1710), fill="#7BC989")
     d.rectangle((0, 1360, W, H), fill=ground)
-    # winding path gives depth
     d.polygon([(430, H), (650, H), (585, 1450), (520, 1350), (475, 1450)], fill="#E8C58A")
-    # trees, bushes and flowers
     for x in [75, 900]:
         d.rectangle((x+55, 900, x+85, 1370), fill="#7B5A3A")
         d.ellipse((x-40, 760, x+180, 1010), fill="#58A96C")
@@ -128,7 +124,6 @@ def rich_scene(story, scene, index, path):
         x = rng.randint(30, W-30); y = rng.randint(1300, 1810)
         r = rng.choice([7, 9, 12])
         d.ellipse((x-r, y-r, x+r, y+r), fill=rng.choice(["#FF8FB1", "#FFD84D", "#FFFFFF"]))
-    # floating sparkles, but no text/UI
     for k in range(8):
         x = 120 + ((k * 149 + index * 71) % 780)
         y = 470 + ((k * 91 + index * 53) % 620)
@@ -141,7 +136,6 @@ def rich_scene(story, scene, index, path):
     positions = [(390, 1040), (560, 1010), (420, 1060), (570, 1030)]
     cx, cy = positions[index]
     draw_character(d, character, cx, cy, happy=True)
-    # cinematic foreground leaves for depth
     for x in [0, 1030]:
         d.ellipse((x-100, 1570, x+180, 1960), fill="#4F9C68")
     img.save(path, quality=95)
@@ -177,10 +171,10 @@ async def make_tts(text, path):
 
 def fit_voice(src, dst, target):
     d = duration(src)
-    # Never slow speech. Only a modest speed-up is allowed; Gemini is instructed to keep lines short.
-    factor = max(1.0, d / (target - 0.18))
-    factor = min(factor, 1.16)
-    # Slight pitch lift makes the narrator feel more playful/cartoon-like without chipmunk artifacts.
+    if d > target - 0.18:
+        factor = min(1.16, d / (target - 0.18))
+    else:
+        factor = 1.0
     pitch = 1.045
     tempo = factor / pitch
     run(["ffmpeg", "-y", "-i", str(src), "-af", f"asetrate=44100*{pitch:.4f},aresample=44100,atempo={tempo:.5f},atrim=0:{target-0.08:.3f},apad=pad_dur=0.08", "-t", str(target), "-ar", "44100", "-ac", "1", str(dst)])
@@ -250,15 +244,19 @@ def main():
         asyncio.run(make_tts(sc['narration'],raw)); fit_voice(raw,v,SCENE_SECONDS); sfx(s,kind(sc.get('sfx',''))); voices.append(v); sfxs.append(s)
     music=WORK/"prod_music.wav"; make_music(music,SCENES*SCENE_SECONDS)
     ass=WORK/"prod_subs.ass"; ass_file(story,scenes,voices,ass)
-    # Voice and SFX are scene-locked. Music is automatically ducked under narration; SFX is separate and quiet.
     cmd=["ffmpeg","-y","-i",str(concat),"-i",str(music)]
     for v,s in zip(voices,sfxs): cmd += ["-i",str(v),"-i",str(s)]
     filters=["[1:a]volume=0.08[m0]"]; voice_labels=[]; sfx_labels=[]
     for i in range(SCENES):
-        vi=2+i*2; si=vi+1; delay=int(round(i*SCENE_SECONDS*1000))
-        filters += [f"[{vi}:a]adelay={delay}|{delay},volume=1.0[v{i}]",f"[{si}:a]adelay={delay}|{delay},volume=0.38[s{i}]"]
-        voice_labels.append(f"[v{i}]"); sfx_labels.append(f"[s{i}]")
-    # Sidechain music with the combined voice signal so narration is always intelligible.
+        vi=2+i*2; si=vi+1; scene_start=i*SCENE_SECONDS
+        voice_delay=int(round(scene_start*1000))
+        filters += [f"[{vi}:a]adelay={voice_delay}|{voice_delay},volume=1.0[v{i}]"]
+        voice_labels.append(f"[v{i}]")
+        voice_len=duration(voices[i])
+        sfx_time=min(scene_start + voice_len + 0.08, (i+1)*SCENE_SECONDS - 0.48)
+        sfx_delay=int(round(max(scene_start, sfx_time)*1000))
+        filters += [f"[{si}:a]adelay={sfx_delay}|{sfx_delay},volume=0.38[s{i}]"]
+        sfx_labels.append(f"[s{i}]")
     filters += ["".join(voice_labels)+f"amix=inputs={SCENES}:duration=longest:normalize=0[duckkey]", "[m0][duckkey]sidechaincompress=threshold=0.025:ratio=8:attack=8:release=280:makeup=1[ducked]"]
     mix="[ducked]"+"".join(voice_labels)+"".join(sfx_labels)+f"amix=inputs={1+SCENES+SCENES}:duration=longest:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=8[aout]"
     filters.append(mix)
