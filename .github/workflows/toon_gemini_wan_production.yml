@@ -1,0 +1,51 @@
+name: Toon Kids - Gemini Story + Wan 2.2 Production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_TEXT_MODEL: ${{ vars.GEMINI_TEXT_MODEL }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_WAN_SPACE: zerogpu-aoti/wan2-2-fp8da-aoti-faster
+      HF_WAN_OUTPUT: toon_gemini_wan_production.mp4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install media dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-genai edge-tts pillow gradio_client google-api-python-client google-auth google-auth-oauthlib
+      - name: Validate configuration
+        run: |
+          test -n "$GEMINI_API_KEY" || (echo 'GEMINI_API_KEY secret is missing' && exit 1)
+          if [ -n "$HF_TOKEN" ]; then echo 'HF_TOKEN present — authenticated ZeroGPU quota'; else echo 'HF_TOKEN missing — anonymous ZeroGPU quota'; fi
+      - name: Validate production code
+        run: python -m py_compile src/hf_wan_gemini_production.py src/toon_kids_story.py
+      - name: Generate Gemini story + Wan video + audio
+        run: python src/hf_wan_gemini_production.py
+      - name: Media QA
+        run: |
+          test -s toon_gemini_wan_production.mp4
+          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_gemini_wan_production.mp4
+      - name: Upload production test
+        uses: actions/upload-artifact@v4
+        with:
+          name: toon-gemini-wan-production
+          path: toon_gemini_wan_production.mp4
+          retention-days: 7
