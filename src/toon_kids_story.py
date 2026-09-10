@@ -17,13 +17,6 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 from PIL import Image, ImageDraw, ImageFont
 
-# ============================================================
-# TOON KIDS — FREE / NO VIDEO-API STORY ENGINE
-# Gemini text (with local fallback) -> vector cartoon scenes
-# -> FFmpeg motion -> Hindi Edge TTS -> YouTube Shorts
-# No Veo, no Cloudflare video, no GPU/video-generation quota.
-# ============================================================
-
 BASE = Path(__file__).resolve().parent.parent
 OUT = BASE / "toon_kids_short.mp4"
 META = BASE / "story_metadata.json"
@@ -145,54 +138,29 @@ def choose_topic(history):
         topic = f"{c} का मजेदार रोमांच: {p} में {o} मिलने की कहानी, जिसमें एक छोटी समस्या, मजेदार खोज और प्यारा सरप्राइज हो।"
         if norm(topic) not in used:
             return topic
-    return f"एक बिल्कुल नई बच्चों की कहानी {secrets.token_hex(6)}"
+    return f"एक मजेदार बच्चों की कहानी जिसमें {secrets.choice(CHARACTERS)} कुछ नया सीखता है।"
 
 
-def make_story(client, topic, history):
-    history_titles = []
-    for item in history[-25:]:
-        if isinstance(item, dict) and item.get("title"):
-            history_titles.append(item["title"])
-        elif isinstance(item, str):
-            history_titles.append(item[:100])
-
+def generate_story(topic):
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     prompt = f"""
-तुम एक expert Hindi preschool YouTube Shorts storyteller हो।
-एक बिल्कुल नई, मजेदार, प्यारी और आसानी से समझ आने वाली कहानी बनाओ।
-TOPIC SEED: {topic}
-पुरानी कहानियों/टाइटल से बचो: {json.dumps(history_titles, ensure_ascii=False)}
+आप बच्चों के लिए एक बहुत प्यारी, मजेदार और स्पष्ट हिंदी कहानी लिख रहे हैं।
+विषय: {topic}
 
-STRICT OUTPUT: केवल valid JSON, कोई markdown नहीं।
-Schema:
-{{
-  "title": "छोटा catchy Hindi title",
-  "topic": "one-line story topic",
-  "moral": "एक बहुत छोटा positive lesson",
-  "character": "मुख्य character का पूरा fixed description",
-  "scenes": [
-    {{"narration":"12-18 सरल Hindi words", "visual":"clear visual action", "camera":"camera direction"}}
-  ]
-}}
-
-Rules:
-- Exactly {SCENE_COUNT} scenes.
-- हर scene लगभग 8 seconds के narration के लिए हो; narration 12-18 सरल Hindi words.
+JSON में title, topic, moral, character और ठीक 7 scenes दें। हर scene में narration, visual, camera दें।
+नियम:
 - Scene 1 से 7 तक कहानी naturally आगे बढ़े और scene 7 में प्यारा ending + moral हो।
 - Same main character, same appearance, same outfit पूरे video में।
 - Preschool-friendly, colorful, funny, wholesome.
 - No scary violence, weapons, horror or sad ending.
 """
-
     last_error = None
     for model in [TEXT_MODEL, FALLBACK_TEXT_MODEL]:
         try:
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.9,
-                    response_mime_type="application/json",
-                ),
+                config=types.GenerateContentConfig(temperature=0.9, response_mime_type="application/json"),
             )
             data = json.loads(response.text)
             scenes = data.get("scenes", [])
@@ -211,7 +179,6 @@ Rules:
 def local_story(history):
     candidates = [s for s in LOCAL_STORIES if not is_duplicate(s, history)]
     if not candidates:
-        # Create a fresh variant from the first template without needing an API.
         base = LOCAL_STORIES[0]
         variant = json.loads(json.dumps(base, ensure_ascii=False))
         variant["title"] = "खरगोश और दोस्तों का नया सरप्राइज"
@@ -219,8 +186,6 @@ def local_story(history):
         return variant
     return secrets.choice(candidates)
 
-
-# ---------------------- LOCAL CARTOON ART ----------------------
 
 def font(size, bold=False):
     paths = [
@@ -240,7 +205,6 @@ def rounded(draw, box, radius, fill, outline=None, width=1):
 
 def draw_character(draw, name, cx, cy, scale=1.0, happy=True):
     n = str(name)
-    # Fixed palette by animal type; the same mapping is reused for every scene.
     if "象" in n or "हाथी" in n:
         body, ear, accent = "#9ED7F5", "#78B8DD", "#FFD84D"
         head_r = 135
@@ -286,7 +250,6 @@ def draw_character(draw, name, cx, cy, scale=1.0, happy=True):
         draw.polygon([(cx-95,cy-75),(cx-145,cy-230),(cx-25,cy-125)], fill=ear, outline="#A87888")
         draw.polygon([(cx+95,cy-75),(cx+145,cy-230),(cx+25,cy-125)], fill=ear, outline="#A87888")
 
-    # Eyes and face
     eye_y = cy - 25
     for ex in (cx - 48, cx + 48):
         draw.ellipse((ex-18, eye_y-28, ex+18, eye_y+28), fill="#1E2630")
@@ -295,7 +258,6 @@ def draw_character(draw, name, cx, cy, scale=1.0, happy=True):
         draw.arc((cx-55, cy+5, cx+55, cy+85), 10, 170, fill="#7A3F4A", width=8)
     else:
         draw.arc((cx-50, cy+35, cx+50, cy+80), 190, 350, fill="#7A3F4A", width=7)
-    # simple outfit / accessory keeps continuity recognizable
     rounded(draw, (cx-115, cy+115, cx+115, cy+245), 35, accent)
 
 
@@ -327,7 +289,6 @@ def draw_object(draw, obj, cx, cy, scale=1.0):
         for i in range(10):
             a=-90+i*36
             r=125 if i%2==0 else 55
-            import math
             pts.append((cx+r*math.cos(math.radians(a)),cy+r*math.sin(math.radians(a))))
         draw.polygon(pts, fill="#FFD84D", outline="#D39E22")
     elif "फूल" in o:
@@ -347,48 +308,35 @@ def scene_image(story, scene, index, path):
     rng = random.Random(seed)
     img = Image.new("RGB", (WIDTH, HEIGHT), "#BFE8FF")
     d = ImageDraw.Draw(img)
-
-    # cheerful sky/ground
     sky = ["#BFE8FF","#CFF5D2","#FFE7B3","#DCCBFF","#BDE9FF","#FFF1B8","#CDE7FF"][index % 7]
     d.rectangle((0,0,WIDTH,HEIGHT), fill=sky)
     d.ellipse((WIDTH-330,100,WIDTH-80,350), fill="#FFD84D")
     for x in [100, 360, 700]:
         d.ellipse((x,220,x+180,300), fill="white")
         d.ellipse((x+55,170,x+250,300), fill="white")
-    # hills
     d.ellipse((-250,1050,700,1750), fill="#8FD69B")
     d.ellipse((400,1050,1300,1750), fill="#78C88A")
     d.rectangle((0,1350,WIDTH,HEIGHT), fill="#79C987")
-    # decorative flowers/stars
     for _ in range(14):
         x=rng.randint(40,WIDTH-40); y=rng.randint(1200,1800)
         d.ellipse((x-12,y-12,x+12,y+12), fill=rng.choice(["#FF8FB1","#FFD84D","#FFFFFF"]))
 
-    # Determine the main animal and object from story text.
     character = story.get("character", story.get("title", "खरगोश"))
     joined = " ".join([character, scene.get("visual", ""), story.get("topic", "")])
     object_name = next((o for o in OBJECTS if o.split()[0] in joined or o in joined), OBJECTS[index % len(OBJECTS)])
     if "पतंग" in joined: object_name = "उड़ने वाली पतंग"
     if "चाबी" in joined: object_name = "चमकती चाबी"
     if "गेंद" in joined: object_name = "सुनहरी गेंद"
-    if "फूल" in joined: object_name = "रंग बदलने वाला फूल"
-
-    # Main character position varies by scene so the stills do not feel identical.
-    cx = [330,430,620,470,650,420,540][index]
-    cy = [930,980,1000,930,980,940,930][index]
-    draw_character(d, character, cx, cy, happy=index != 1)
+    draw_character(d, character, 540, 1080, 1.0, happy=True)
     draw_object(d, object_name, 800 if index % 2 == 0 else 250, 780 if index % 2 == 0 else 700)
 
-    # Small visual cue: a soft action trail / sparkles.
     for k in range(7):
         x = 120 + ((k * 137 + index * 91) % 800)
         y = 480 + ((k * 83 + index * 57) % 470)
         r = 7 + (k % 3) * 4
         d.ellipse((x-r,y-r,x+r,y+r), fill="#FFFFFF")
 
-    # Keep a tiny episode badge without depending on Hindi text rendering.
-    rounded(d, (55,55,265,130), 25, "#FFFFFF")
-    d.text((90,72), f"SCENE {index+1}", font=font(34, True), fill="#4C6FFF")
+    # Deliberately no episode badge: it can become a blurred/garbled artifact in I2V.
     img.save(path, quality=95)
 
 
@@ -402,8 +350,6 @@ def ffmpeg_run(args):
 
 
 def animate_scene(image_path, tts_path, out_path, index):
-    # zoompan provides continuous motion from a single locally-rendered cartoon frame.
-    # Different scenes use different pan directions for variety.
     if index % 4 == 0:
         z = "min(zoom+0.0009,1.10)"
         x = "iw/2-(iw/zoom/2)"
@@ -422,30 +368,23 @@ def animate_scene(image_path, tts_path, out_path, index):
         y = "(ih-ih/zoom)*(on/(d-1))"
 
     vf = (
-        f"scale=1280:2276:force_original_aspect_ratio=increase," 
-        f"crop=1280:2276," 
+        f"scale=1280:2276:force_original_aspect_ratio=increase,crop=1280:2276,"
         f"zoompan=z='{z}':x='{x}':y='{y}':d={SCENE_SECONDS*FPS}:s={WIDTH}x{HEIGHT}:fps={FPS},"
         "format=yuv420p"
     )
     ffmpeg_run([
         "ffmpeg", "-y", "-loop", "1", "-i", str(image_path), "-i", str(tts_path),
-        "-map", "0:v:0", "-map", "1:a:0", "-vf", vf,
-        "-t", str(SCENE_SECONDS),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-r", str(FPS), "-pix_fmt", "yuv420p",
-        "-af", "apad=pad_dur=8,atrim=0:8,loudnorm=I=-16:TP=-1.5:LRA=11",
-        "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
-        "-movflags", "+faststart", str(out_path),
+        "-map", "0:v:0", "-map", "1:a:0", "-vf", vf, "-t", str(SCENE_SECONDS),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-r", str(FPS),
+        "-pix_fmt", "yuv420p", "-af", "apad=pad_dur=8,atrim=0:8,loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-movflags", "+faststart", str(out_path),
     ])
 
 
 def concat_scenes(scene_paths):
     concat_file = WORK / "concat.txt"
     concat_file.write_text("".join(f"file '{p.resolve()}'\n" for p in scene_paths), encoding="utf-8")
-    ffmpeg_run([
-        "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
-        "-c", "copy", "-movflags", "+faststart", str(OUT),
-    ])
+    ffmpeg_run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file), "-c", "copy", "-movflags", "+faststart", str(OUT)])
 
 
 async def make_tts(text, output_path):
@@ -461,161 +400,16 @@ def upload_youtube(story):
     if not UPLOAD_YOUTUBE:
         print("ℹ️ YouTube upload disabled")
         return None
-
     client_id = os.getenv("YOUTUBE_CLIENT_ID")
     client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
     refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN")
     if not all([client_id, client_secret, refresh_token]):
         raise RuntimeError("Missing YouTube OAuth secrets")
-
-    credentials = Credentials(
-        None,
-        refresh_token=refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=client_id,
-        client_secret=client_secret,
-        scopes=["https://www.googleapis.com/auth/youtube.upload"],
-    )
-    youtube = build("youtube", "v3", credentials=credentials)
-
-    title = str(story.get("title", "Toon Kids Story"))[:95]
-    if RUN_SLOT == "0":
-        title = f"{title} 🐰 | Kids Story #Shorts"
-    elif RUN_SLOT == "1":
-        title = f"{title} 🌈 | Kids Story #Shorts"
-    else:
-        title = f"{title} 🎈 | Kids Story #Shorts"
-
-    description = (
-        f"{story.get('topic','')}\n\n"
-        f"🌟 Moral: {story.get('moral','')}\n\n"
-        "प्यारी हिंदी बच्चों की कहानी, fun cartoon adventure और learning के साथ। "
-        "ऐसी मजेदार kids stories के लिए subscribe करें!\n\n"
-        "#Shorts #Kids #KidsStory #HindiStory #Cartoon #KidsVideo #MoralStory"
-    )
-
-    body = {
-        "snippet": {
-            "title": title,
-            "description": description,
-            "categoryId": "24",
-            "tags": ["kids", "kids story", "hindi story", "cartoon", "moral story", "children story", "youtube shorts"],
-            "defaultLanguage": "hi",
-        },
-        "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": True},
-    }
-
-    print("📤 Uploading to YouTube...")
-    request = youtube.videos().insert(
-        part="snippet,status",
-        body=body,
-        media_body=MediaFileUpload(str(OUT), mimetype="video/mp4", resumable=True),
-    )
-    response = None
-    while response is None:
-        status, response = request.next_chunk()
-        if status:
-            print(f"📤 Upload: {int(status.progress() * 100)}%")
-    video_id = response.get("id")
-    print(f"✅ YouTube uploaded: https://youtu.be/{video_id}")
-    return video_id
-
-
-def main():
-    api_key = os.getenv("GEMINI_API_KEY")
-    print("==========================================")
-    print("TOON KIDS — FREE LOCAL ANIMATION")
-    print("==========================================")
-    print(f"Text model: {TEXT_MODEL}")
-    print(f"Scenes: {SCENE_COUNT} x {SCENE_SECONDS}s")
-    print("Video generator: NONE (Pillow + FFmpeg)")
-    print(f"Run slot: {RUN_SLOT}")
-
-    for p in WORK.glob("*"):
-        if p.is_file():
-            p.unlink()
-
-    history = load_history()
-    story = None
-
-    # Gemini is optional. If its free quota is exhausted, the workflow continues locally.
-    if api_key:
-        try:
-            client = genai.Client(api_key=api_key)
-            for attempt in range(5):
-                topic = choose_topic(history)
-                candidate = make_story(client, topic, history)
-                candidate["topic"] = topic
-                if not is_duplicate(candidate, history):
-                    story = candidate
-                    break
-                print(f"⚠️ Duplicate-like story detected; regenerating ({attempt + 1}/5)")
-        except Exception as exc:
-            print(f"⚠️ Gemini unavailable/exhausted; switching to local story: {exc}")
-
-    if story is None:
-        story = local_story(history)
-        print("🆓 Local fallback story selected — no text API required.")
-
-    print(f"📖 Story: {story.get('title')}")
-    print(f"💡 Moral: {story.get('moral')}")
-
-    scene_paths = []
-    for i, scene in enumerate(story["scenes"]):
-        image_path = WORK / f"scene_art_{i+1:02d}.png"
-        narration_audio = WORK / f"tts_{i+1:02d}.mp3"
-        final_scene = WORK / f"scene_{i+1:02d}.mp4"
-
-        print(f"🎨 Drawing cartoon scene {i+1}/{SCENE_COUNT}")
-        scene_image(story, scene, i, image_path)
-        print(f"🗣️ Generating Hindi narration {i+1}/{SCENE_COUNT}")
-        make_tts_sync(scene["narration"], narration_audio)
-        print(f"🎞️ Animating scene {i+1}/{SCENE_COUNT}")
-        animate_scene(image_path, narration_audio, final_scene, i)
-        scene_paths.append(final_scene)
-
-    concat_scenes(scene_paths)
-
-    metadata = {
-        "title": story.get("title", ""),
-        "topic": story.get("topic", ""),
-        "moral": story.get("moral", ""),
-        "scene_count": SCENE_COUNT,
-        "scene_seconds": SCENE_SECONDS,
-        "target_duration_seconds": SCENE_COUNT * SCENE_SECONDS,
-        "video_generator": "local_pillow_ffmpeg",
-        "text_model": TEXT_MODEL if api_key else "local_fallback",
-        "run_slot": RUN_SLOT,
-        "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-
-    video_id = upload_youtube(story)
-    if video_id:
-        metadata["youtube_video_id"] = video_id
-        metadata["youtube_url"] = f"https://youtu.be/{video_id}"
-
-    META.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    fingerprint = hashlib.sha256(norm(story_text(story)).encode("utf-8")).hexdigest()
-    history.append({
-        "title": story.get("title", ""),
-        "topic": story.get("topic", ""),
-        "moral": story.get("moral", ""),
-        "story_text": story_text(story),
-        "fingerprint": fingerprint,
-        "youtube_video_id": video_id,
-        "created_at_utc": metadata["created_at_utc"],
-    })
-    save_history(history)
-
-    print("==========================================")
-    print("✅ TOON KIDS SHORT COMPLETE")
-    print(f"🎥 Output: {OUT}")
-    print(f"⏱️ Duration target: {SCENE_COUNT * SCENE_SECONDS}s")
-    if video_id:
-        print(f"📺 YouTube: https://youtu.be/{video_id}")
-    print("==========================================")
-
-
-if __name__ == "__main__":
-    main()
+    creds = Credentials(None, refresh_token=refresh_token, token_uri="https://oauth2.googleapis.com/token", client_id=client_id, client_secret=client_secret)
+    youtube = build("youtube", "v3", credentials=creds)
+    title = story.get("title", "Toon Kids Story")
+    body = f"{story.get('topic','')}\n\n{story.get('moral','')}\n\n#Kids #HindiStory #ToonKids"
+    request = youtube.videos().insert(part="snippet,status", body={"snippet":{"title":title[:100],"description":body[:5000],"categoryId":"24"},"status":{"privacyStatus":"public"}}, media_body=MediaFileUpload(str(OUT), mimetype="video/mp4"))
+    response = request.execute()
+    print("YouTube video id:", response.get("id"))
+    return response.get("id")
