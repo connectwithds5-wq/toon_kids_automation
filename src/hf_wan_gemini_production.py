@@ -215,7 +215,7 @@ def kind(name):
 
 
 def ass_file(story, scenes, voices, path):
-    lines=["[Script Info]","ScriptType: v4.00+","PlayResX:1080","PlayResY:1920","","[V4+ Styles]","Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding","Style: Kids,Noto Sans Devanagari,56,&H00FFFFFF,&H00FFFFFF,&H001B263B,&H90000000,1,5,2,2,60,60,145,1","","[Events]","Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    lines=["[Script Info]","ScriptType: v4.00+","PlayResX:1080","PlayResY:1920","","[V4+ Styles]","Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding","Style: Kids,Noto Sans Devanagari,56,&H00FFFFFF,&H00FFFFFF,&H001B263B,&H90000000,1,0,0,0,100,100,0,0,1,5,2,2,60,60,145,1","","[Events]","Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
     def ts(x):
         m=int(x//60); s=x-m*60; return f"{m}:{s:04.1f}"
     for i,(sc,v) in enumerate(zip(scenes,voices)):
@@ -247,7 +247,6 @@ def main():
     cmd=["ffmpeg","-y","-i",str(concat),"-i",str(music)]
     for v,s in zip(voices,sfxs): cmd += ["-i",str(v),"-i",str(s)]
     filters=["[1:a]volume=0.08[m0]"]; voice_labels=[]; sfx_labels=[]
-    sfx_delays=[]
     for i in range(SCENES):
         vi=2+i*2; si=vi+1; scene_start=i*SCENE_SECONDS
         voice_delay=int(round(scene_start*1000))
@@ -256,7 +255,6 @@ def main():
         voice_len=duration(voices[i])
         sfx_time=min(scene_start + voice_len + 0.08, (i+1)*SCENE_SECONDS - 0.48)
         sfx_delay=int(round(max(scene_start, sfx_time)*1000))
-        sfx_delays.append(sfx_delay)
         filters += [f"[{si}:a]adelay={sfx_delay}|{sfx_delay},volume=0.38[s{i}]"]
         sfx_labels.append(f"[s{i}]")
     filters += ["".join(voice_labels)+f"amix=inputs={SCENES}:duration=longest:normalize=0[duckkey]", "[m0][duckkey]sidechaincompress=threshold=0.025:ratio=8:attack=8:release=280:makeup=1[ducked]"]
