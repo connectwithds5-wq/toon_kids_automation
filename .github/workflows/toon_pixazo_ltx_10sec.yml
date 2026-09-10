@@ -9,7 +9,7 @@ permissions:
 jobs:
   pixazo-story:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 75
     env:
       PIXAZO_API_KEY: ${{ secrets.PIXAZO_API_KEY }}
       PIXAZO_OUTPUT: toon_pixazo_ltx_10sec_story_av.mp4
