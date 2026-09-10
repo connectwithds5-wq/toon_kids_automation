@@ -1,4 +1,4 @@
-name: Toon Story - Pixazo LTX Free 10s AV
+name: Toon Story - Gemini + Pixazo LTX Cinematic Test
 
 on:
   workflow_dispatch:
@@ -12,7 +12,11 @@ jobs:
     timeout-minutes: 75
     env:
       PIXAZO_API_KEY: ${{ secrets.PIXAZO_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
+      GEMINI_FALLBACK_MODEL: gemini-3.6-flash
       PIXAZO_OUTPUT: toon_pixazo_ltx_10sec_story_av.mp4
+      PIXAZO_METADATA: pixazo_story_metadata.json
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,28 +36,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests edge-tts pillow gradio_client google-genai google-api-python-client google-auth google-auth-oauthlib
 
-      - name: Check Pixazo key
+      - name: Check AI keys
         run: |
           if [ -z "$PIXAZO_API_KEY" ]; then
             echo "❌ PIXAZO_API_KEY secret is missing"
             exit 1
           fi
-          echo "✅ PIXAZO_API_KEY is present"
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "❌ GEMINI_API_KEY secret is missing"
+            exit 1
+          fi
+          echo "✅ PIXAZO_API_KEY present"
+          echo "✅ GEMINI_API_KEY present"
 
-      - name: Validate Pixazo script
-        run: python -m py_compile src/pixazo_ltx_10sec_story_av.py src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py
+      - name: Validate cinematic pipeline
+        run: |
+          python -m py_compile src/pixazo_ltx_10sec_story_av.py src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py
+          echo "✅ Python syntax OK"
 
-      - name: Generate 10s Toon story with Pixazo LTX FREE
+      - name: Generate Gemini story + cinematic Pixazo video
         run: python src/pixazo_ltx_10sec_story_av.py
 
-      - name: Verify final media
+      - name: Verify final media and story metadata
         run: |
           test -s toon_pixazo_ltx_10sec_story_av.mp4
+          test -s pixazo_story_metadata.json
           ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_pixazo_ltx_10sec_story_av.mp4
+          echo "----- GEMINI STORY -----"
+          cat pixazo_story_metadata.json
 
-      - name: Upload Pixazo video artifact
+      - name: Upload video + story metadata
         uses: actions/upload-artifact@v4
         with:
-          name: toon-pixazo-ltx-10sec-av
-          path: toon_pixazo_ltx_10sec_story_av.mp4
+          name: toon-gemini-pixazo-cinematic-test
+          path: |
+            toon_pixazo_ltx_10sec_story_av.mp4
+            pixazo_story_metadata.json
           retention-days: 3
