@@ -1,6 +1,8 @@
+import concurrent.futures
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from google import genai
@@ -15,8 +17,10 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash-lite")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 H3_SPACE = os.getenv("MINIMAX_H3_SPACE", "multimodalart/minimax-h3")
-DURATION = int(os.getenv("MINIMAX_H3_DURATION", "10"))
-# Use the smallest native 9:16 canvas to keep one daily generation practical on ZeroGPU.
+# H3 currently runs its generator on ZeroGPU xlarge (2x quota). An 8s/10-step
+# request fits much more safely inside the 5-minute free daily quota.
+DURATION = int(os.getenv("MINIMAX_H3_DURATION", "8"))
+FINAL_DURATION = int(os.getenv("MINIMAX_H3_FINAL_DURATION", "10"))
 CANVAS = os.getenv("MINIMAX_H3_CANVAS", "544x960 · 9:16 fast")
 STEPS = int(os.getenv("MINIMAX_H3_STEPS", "10"))
 
@@ -57,9 +61,9 @@ The entire story must be understandable visually without narration.
 
 FORMAT:
 0-2s = instant visual hook
-2-6s = simple cute action/discovery
-6-8s = surprising magical transformation
-8-{DURATION}s = delightful payoff that can visually loop
+2-5s = simple cute action/discovery
+5-7s = surprising magical transformation
+7-{DURATION}s = delightful payoff that can visually loop
 
 QUALITY TARGET:
 High-end cinematic 3D animation, Google Flow/Veo-style visual polish, rich scenery,
@@ -103,17 +107,24 @@ Return ONLY valid JSON:
 
 def generate_video(concept):
     client = Client(H3_SPACE, token=HF_TOKEN)
-    result = client.predict(
-        prompt=concept["prompt"],
-        image_path=None,
-        last_image_path=None,
-        canvas=CANVAS,
-        duration=DURATION,
-        steps=STEPS,
-        seed=42,
-        upsample=False,
-        api_name="/generate",
-    )
+    try:
+        result = client.predict(
+            prompt=concept["prompt"],
+            image_path=None,
+            last_image_path=None,
+            canvas=CANVAS,
+            duration=DURATION,
+            steps=STEPS,
+            seed=42,
+            upsample=False,
+            api_name="/generate",
+        )
+    except concurrent.futures.CancelledError as exc:
+        raise RuntimeError(
+            "MiniMax H3 request was cancelled by the Gradio/ZeroGPU stream. "
+            "This usually means the ZeroGPU worker/queue or quota reservation was not able to complete the request. "
+            "The pipeline now uses an 8s generation to stay within the free quota."
+        ) from exc
     if not isinstance(result, (list, tuple)) or not result:
         raise RuntimeError(f"Unexpected MiniMax H3 response: {result!r}")
     video = result[0]
@@ -122,15 +133,41 @@ def generate_video(concept):
     source = Path(str(video))
     if not source.is_file():
         raise FileNotFoundError(f"MiniMax H3 returned no local video: {video!r}")
-    shutil.copy2(source, OUT)
+
+    if FINAL_DURATION <= DURATION:
+        shutil.copy2(source, OUT)
+        return OUT
+
+    # Keep the public deliverable at 10 seconds without spending extra H3 quota.
+    # The generated clip is extended by freezing its final frame; H3 soundtrack is
+    # preserved and padded with silence for the short tail.
+    extension = FINAL_DURATION - DURATION
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(source),
+            "-vf", f"tpad=stop_mode=clone:stop_duration={extension}",
+            "-af", f"apad=pad_dur={extension}",
+            "-t", str(FINAL_DURATION),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+            str(OUT),
+        ],
+        check=True,
+    )
     return OUT
 
 
 def main():
     concept = make_concept()
     print("TINY WONDER:", json.dumps(concept, ensure_ascii=False, indent=2))
-    print(f"MiniMax H3 settings: canvas={CANVAS}, duration={DURATION}s, steps={STEPS}")
+    print(
+        f"MiniMax H3 settings: canvas={CANVAS}, generation={DURATION}s, "
+        f"steps={STEPS}, final={FINAL_DURATION}s"
+    )
     video = generate_video(concept)
+    concept["generation_duration_seconds"] = DURATION
+    concept["final_duration_seconds"] = FINAL_DURATION
     META.write_text(json.dumps(concept, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"FINAL: {video}")
     print(f"TITLE: {concept['title']}")
