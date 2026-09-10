@@ -1,0 +1,59 @@
+name: Toon Story - Pixazo LTX Free 10s AV
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pixazo-story:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PIXAZO_API_KEY: ${{ secrets.PIXAZO_API_KEY }}
+      PIXAZO_OUTPUT: toon_pixazo_ltx_10sec_story_av.mp4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install FFmpeg and Hindi fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests edge-tts pillow gradio_client google-genai google-api-python-client google-auth google-auth-oauthlib
+
+      - name: Check Pixazo key
+        run: |
+          if [ -z "$PIXAZO_API_KEY" ]; then
+            echo "❌ PIXAZO_API_KEY secret is missing"
+            exit 1
+          fi
+          echo "✅ PIXAZO_API_KEY is present"
+
+      - name: Validate Pixazo script
+        run: python -m py_compile src/pixazo_ltx_10sec_story_av.py src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py
+
+      - name: Generate 10s Toon story with Pixazo LTX
+        run: python src/pixazo_ltx_10sec_story_av.py
+
+      - name: Verify final media
+        run: |
+          test -s toon_pixazo_ltx_10sec_story_av.mp4
+          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_pixazo_ltx_10sec_story_av.mp4
+
+      - name: Upload Pixazo video artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toon-pixazo-ltx-10sec-av
+          path: toon_pixazo_ltx_10sec_story_av.mp4
+          retention-days: 3
