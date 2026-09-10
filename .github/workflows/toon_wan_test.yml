@@ -12,7 +12,8 @@ jobs:
     timeout-minutes: 30
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      HF_WAN_SPACE: alexcheng0072/wan27-free-video-generator
+      # Current fast Wan 2.2 14B I2V ZeroGPU Space.
+      HF_WAN_SPACE: zerogpu-aoti/wan2-2-fp8da-aoti-faster
       HF_WAN_OUTPUT: toon_wan_test.mp4
     steps:
       - name: Checkout repository
