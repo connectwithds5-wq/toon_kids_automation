@@ -15,8 +15,9 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash-lite")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 H3_SPACE = os.getenv("MINIMAX_H3_SPACE", "multimodalart/minimax-h3")
-DURATION = 10
-CANVAS = "544x960 · 9:16 fast"
+DURATION = int(os.getenv("MINIMAX_H3_DURATION", "10"))
+# Use the smallest native 9:16 canvas to keep one daily generation practical on ZeroGPU.
+CANVAS = os.getenv("MINIMAX_H3_CANVAS", "544x960 · 9:16 fast")
 STEPS = int(os.getenv("MINIMAX_H3_STEPS", "10"))
 
 IDEAS = [
@@ -50,7 +51,7 @@ def make_concept():
     seed_ideas = "\n".join(f"{i+1}. {x}" for i, x in enumerate(IDEAS))
     prompt = f"""
 You are the creative director of a premium short-form animation channel called Tiny Wonders.
-Create ONE original 10-second, family-safe, visually magical micro-story.
+Create ONE original {DURATION}-second, family-safe, visually magical micro-story.
 Use one adorable animal only. No dialogue is required.
 The entire story must be understandable visually without narration.
 
@@ -58,7 +59,7 @@ FORMAT:
 0-2s = instant visual hook
 2-6s = simple cute action/discovery
 6-8s = surprising magical transformation
-8-10s = delightful payoff that can visually loop
+8-{DURATION}s = delightful payoff that can visually loop
 
 QUALITY TARGET:
 High-end cinematic 3D animation, Google Flow/Veo-style visual polish, rich scenery,
@@ -79,7 +80,7 @@ Return ONLY valid JSON:
   "action": "main continuous action",
   "twist": "magical transformation",
   "ending": "happy satisfying ending",
-  "prompt": "ONE detailed English video-generation prompt describing the full 10-second shot, including camera, lighting, animation and synchronized sound",
+  "prompt": "ONE detailed English video-generation prompt describing the full {DURATION}-second shot, including camera, lighting, animation and synchronized sound",
   "caption": "short social caption",
   "moral": "optional one-line positive idea"
 }}
@@ -102,16 +103,15 @@ Return ONLY valid JSON:
 
 def generate_video(concept):
     client = Client(H3_SPACE, token=HF_TOKEN)
-    prompt = concept["prompt"]
     result = client.predict(
-        prompt=prompt,
-        upsample=True,
-        image=None,
-        last_image=None,
+        prompt=concept["prompt"],
+        image_path=None,
+        last_image_path=None,
         canvas=CANVAS,
         duration=DURATION,
         steps=STEPS,
         seed=42,
+        upsample=False,
         api_name="/generate",
     )
     if not isinstance(result, (list, tuple)) or not result:
@@ -129,6 +129,7 @@ def generate_video(concept):
 def main():
     concept = make_concept()
     print("TINY WONDER:", json.dumps(concept, ensure_ascii=False, indent=2))
+    print(f"MiniMax H3 settings: canvas={CANVAS}, duration={DURATION}s, steps={STEPS}")
     video = generate_video(concept)
     META.write_text(json.dumps(concept, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"FINAL: {video}")
