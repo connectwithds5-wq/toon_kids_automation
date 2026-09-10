@@ -197,7 +197,6 @@ def download(url, path):
 
 
 def normalize_clip(src, dst):
-    # Pad or clone the final frame so every Pixazo result is exactly 5.000 seconds.
     run(["ffmpeg", "-y", "-i", str(src), "-vf", f"scale={W}:{H}:flags=lanczos,setsar=1,tpad=stop_mode=clone:stop_duration=5,trim=duration=5,setpts=PTS-STARTPTS", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-r", str(FPS), "-pix_fmt", "yuv420p", str(dst)])
 
 
@@ -223,6 +222,24 @@ def gemini_tts(text, path):
     part = r.candidates[0].content.parts[0]; data = part.inline_data.data
     if isinstance(data, str): data = base64.b64decode(data)
     pcm_wav(path, data)
+
+
+def edge_tts_fallback(text, path):
+    """Reliable fallback when Gemini TTS is temporarily unavailable or overloaded."""
+    import edge_tts
+    print("🔁 FALLBACK TTS: Microsoft Edge hi-IN-SwaraNeural")
+    asyncio.run(edge_tts.Communicate(text=text, voice="hi-IN-SwaraNeural", rate="-3%", pitch="+2Hz").save(str(path)))
+
+
+def generate_voice(text, path):
+    try:
+        gemini_tts(text, path)
+        print("🎤 Gemini 3.1 Flash TTS: sing-song mode")
+        return "gemini"
+    except Exception as exc:
+        print(f"⚠️ Gemini TTS unavailable: {exc}")
+        edge_tts_fallback(text, path)
+        return "edge_fallback"
 
 
 def fit_voice(src, dst, target=5.0):
@@ -276,7 +293,7 @@ def main():
     voices = []; pops = []
     for i, scene in enumerate(plan["scenes"]):
         raw_voice = WORK / f"rhyme_v2_voice_{i+1}.wav"; fitted = WORK / f"rhyme_v2_voice_{i+1}.m4a"
-        gemini_tts(str(scene["lyrics"]), raw_voice); fit_voice(raw_voice, fitted, 5.0); voices.append(fitted)
+        generate_voice(str(scene["lyrics"]), raw_voice); fit_voice(raw_voice, fitted, 5.0); voices.append(fitted)
         pop = WORK / f"rhyme_v2_pop_{i+1}.wav"; make_pop(pop, [880, 988, 1175, 1319][i]); pops.append(pop)
     music = WORK / "rhyme_v2_music_124bpm.wav"; make_music(music)
     ass = WORK / "rhyme_v2_learning_overlay.ass"; make_ass(plan, ass)
