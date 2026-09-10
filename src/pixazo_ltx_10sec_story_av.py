@@ -9,8 +9,8 @@ import edge_tts
 from google import genai
 from google.genai import types
 
+import hf_wan_10sec_story_av_v2 as av
 from toon_kids_story import WORK, load_history
-from hf_wan_10sec_story_av_v2 import assemble, mux, make_music, make_sfx, fit_voice, sfx_kind
 
 PIXAZO_KEY = os.getenv("PIXAZO_API_KEY", "").strip()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -19,27 +19,31 @@ GEMINI_FALLBACK = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.6-flash")
 CATEGORY = os.getenv("CONTENT_CATEGORY", "numbers").strip().lower()
 OUT = Path(os.getenv("PIXAZO_OUTPUT", "toon_pixazo_ltx_10sec_learning.mp4"))
 META = Path(os.getenv("PIXAZO_METADATA", "pixazo_learning_metadata.json"))
-SLOTS = [3.25, 3.35, 3.40]
 API_BASE = "https://gateway.pixazo.ai"
+
+# Slower, calmer educational pacing: only TWO 5-second scenes.
+SLOTS = [5.0, 5.0]
+av.SLOTS = SLOTS
+av.FINAL_SECONDS = 10.0
 
 CATEGORY_DATA = {
     "numbers": {
         "title": "1 से 10 गिनती",
         "items": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
-        "objects": "colorful apples",
-        "lesson": "बच्चों को 1 से 10 तक गिनना सिखाना"
+        "objects": "large shiny red and yellow apples",
+        "lesson": "बच्चों को 1 से 10 तक गिनना सिखाना",
     },
     "fruits": {
         "title": "मजेदार फलों की पहचान",
         "items": ["सेब", "केला", "आम", "संतरा", "स्ट्रॉबेरी", "अंगूर", "तरबूज", "अनानास", "नाशपाती", "पपीता"],
-        "objects": "bright colorful fruits",
-        "lesson": "बच्चों को फलों के नाम पहचानना सिखाना"
+        "objects": "large bright colorful fruits",
+        "lesson": "बच्चों को फलों के नाम पहचानना सिखाना",
     },
     "vegetables": {
         "title": "रंगीन सब्जियाँ",
         "items": ["गाजर", "टमाटर", "आलू", "मटर", "भिंडी", "बैंगन", "मक्का", "फूलगोभी", "पालक", "कद्दू"],
-        "objects": "bright colorful vegetables",
-        "lesson": "बच्चों को सब्जियों के नाम पहचानना सिखाना"
+        "objects": "large bright colorful vegetables",
+        "lesson": "बच्चों को सब्जियों के नाम पहचानना सिखाना",
     },
 }
 
@@ -47,23 +51,36 @@ if CATEGORY not in CATEGORY_DATA:
     CATEGORY = "numbers"
 DATA = CATEGORY_DATA[CATEGORY]
 
+# HARD-LOCK the visual identity. Do not let Gemini invent a new animal per scene.
+CHARACTER = (
+    "one single adorable small WHITE BUNNY, round fluffy face, big blue eyes, "
+    "long upright white ears with pink inner ears, tiny pink nose, rosy cheeks, "
+    "short fluffy tail, wearing the EXACT SAME royal-blue overalls, bright yellow bow tie "
+    "and tiny brown shoes in every scene"
+)
+WORLD = (
+    "the EXACT SAME sunny magical apple garden in both scenes, green grass, "
+    "flower patches, apple trees, warm golden morning light, colorful flowers, soft distant hills"
+)
+
 CINEMATIC_BIBLE = """
 Premium polished 3D animated-feature-quality preschool cartoon.
-Cute expressive main character, rich colorful environment, soft physically believable lighting,
-cinematic depth of field, clean composition, smooth natural motion, polished materials.
-Use purposeful cinematic camera language: establishing wides, overhead reveals, tracking/dolly,
-low-angle hero shots and gentle push-ins only when useful. Never make every shot a face close-up.
-Keep the SAME main character identity, face, body proportions, colors and outfit throughout.
-Keep objects visually simple, large and readable. Vertical 9:16 composition with safe margins.
-No generated text, letters, numbers, subtitles, logos or watermarks inside the AI-generated scene.
+This is a calm, playful educational short, NOT a fast montage.
+Use one single character only and preserve identity exactly.
+Use readable physical actions, gentle body movement and deliberate camera motion.
+Prefer medium-wide and wide framing; do not spend the whole shot on a face close-up.
+Vertical 9:16 composition, safe margins, rich colorful environment, soft believable lighting,
+cinematic depth of field, clean polished materials, smooth natural animation.
+No generated text, letters, numbers, subtitles, signs, logos or watermarks inside the AI scene.
 """
 
 NEGATIVE = (
+    "fast action, frantic motion, rapid cuts, time lapse, speed ramp, camera shake, extreme zoom, fisheye, "
     "blurry, low quality, distorted face, deformed body, extra limbs, bad anatomy, duplicate character, "
-    "character morphing, face morphing, flicker, jitter, unstable clothing, unstable colors, random camera shake, "
-    "extreme unwanted zoom, fisheye distortion, cropped head, cropped ears, subject out of frame, "
-    "misshapen fruit, misshapen vegetable, duplicate objects, text, letters, numbers, subtitles, logo, watermark, "
-    "horror, scary, violence, dark disturbing mood"
+    "character morphing, face morphing, flicker, jitter, unstable clothing, unstable colors, cropped head, "
+    "cropped ears, subject out of frame, sheep, lamb, goat, mouse, rat, hamster, bear, cat, dog, fox, monkey, "
+    "second character, crowd, extra animal, misshapen apple, duplicate objects, floating objects, text, letters, "
+    "numbers, subtitles, logo, watermark, horror, scary, violence, dark disturbing mood"
 )
 
 
@@ -73,60 +90,48 @@ def gemini_learning_plan():
 
     history = load_history()
     old_titles = [x.get("title", "") for x in history[-20:] if isinstance(x, dict)]
-    item_text = json.dumps(DATA["items"], ensure_ascii=False)
     prompt = f"""
-You are a senior preschool educational content director and cinematic animation director.
-Create a highly entertaining educational SHORT, not a story.
+You are directing a premium preschool educational short.
+Create a FUN, CALM, EASY-TO-FOLLOW 10-second learning video.
+This is NOT a story and NOT a rapid montage.
 CATEGORY: {CATEGORY}
 LESSON: {DATA['lesson']}
-EXACT ITEMS IN ORDER: {item_text}
-MAIN VISUAL OBJECTS: {DATA['objects']}
-AVOID OLD TITLES: {json.dumps(old_titles, ensure_ascii=False)}
+EXACT ITEMS IN ORDER: {json.dumps(DATA['items'], ensure_ascii=False)}
+OLD TITLES TO AVOID: {json.dumps(old_titles, ensure_ascii=False)}
 
-The finished video is EXACTLY 10 seconds and has EXACTLY 3 scenes of about 3.3 seconds each.
-Split the exact items into these fixed groups:
-Scene 1 = items 1-3
-Scene 2 = items 4-7
-Scene 3 = items 8-10
-Do not add, remove, reorder or rename any item.
+There are EXACTLY TWO scenes, 5 seconds each:
+Scene 1 teaches items 1-5.
+Scene 2 teaches items 6-10.
 
-The format is HOOK -> LEARN/COUNT -> FUN PAYOFF.
-Use one adorable main cartoon animal, preferably a small bunny, with one fixed outfit.
-The character should interact with the objects physically: hop, point, collect, bounce, reveal, clap, etc.
-No complicated crowds. Maximum 2 characters.
+The main character is FIXED and MUST NOT be changed:
+{CHARACTER}
+There must be NO other animal or person.
+The world is FIXED and MUST NOT change:
+{WORLD}
 
-CAMERA IS CRITICAL:
-Scene 1: cinematic wide/high-angle establishing shot, then a gentle crane/aerial-style reveal toward the character.
-Scene 2: smooth medium side-tracking/dolly or overhead counting shot with clear object movement.
-Scene 3: energetic but stable hero/wide payoff, optionally gentle push-in at the end.
-Specify framing, camera movement, depth/parallax, lens feel and lighting. Avoid generic 'zoom in'.
+PACING:
+- Slow enough for a preschool child to understand.
+- One clear physical action at a time.
+- Use a tiny playful reaction at the end of each scene.
+- Avoid frantic hopping, rapid object spawning, rapid camera movement or excessive close-ups.
 
-Return ONLY valid JSON:
+For each scene give a short Hindi narration that can be spoken comfortably in about 4 seconds.
+Use natural counting with pauses, for example: "एक... दो... तीन... चार... पाँच! वाह!"
+Do not cram extra teaching words into the narration.
+
+CAMERA:
+Scene 1: 5-second medium-wide establishing shot, gentle lateral dolly, bunny clearly visible full-body while it points to/collects five apples one by one; finish with a small happy clap.
+Scene 2: 5-second medium-wide continuation in the SAME garden, gentle arc/orbit, bunny reveals the next five apples and finishes with a cheerful bounce; stable camera, no sudden zoom.
+
+Return ONLY JSON with:
 {{
-  "title":"short catchy Hindi title",
-  "character":"fixed detailed appearance and outfit",
-  "world":"fixed colorful environment",
-  "hook":"very short Hindi hook",
-  "scenes":[
-    {{
-      "items":["exact item strings from the assigned group"],
-      "narration":"simple Hindi narration for this scene",
-      "visual":"specific physical action involving the exact items",
-      "camera":"specific cinematic shot, movement, framing, lens feel and depth",
-      "lighting":"specific lighting",
-      "transition":"visual continuity into next scene"
-    }}
-  ]
+ "title":"short catchy Hindi title",
+ "hook":"very short Hindi hook",
+ "scenes":[
+   {{"items":[],"narration":"","visual":"","camera":"","lighting":""}},
+   {{"items":[],"narration":"","visual":"","camera":"","lighting":""}}
+ ]
 }}
-
-Rules:
-- Exactly 3 scenes.
-- Scene 1 items exactly {json.dumps(DATA['items'][:3], ensure_ascii=False)}
-- Scene 2 items exactly {json.dumps(DATA['items'][3:7], ensure_ascii=False)}
-- Scene 3 items exactly {json.dumps(DATA['items'][7:10], ensure_ascii=False)}
-- Preschool-friendly, cheerful, educational and visually exciting.
-- Keep object counts/identity physically clear.
-- No written text inside generated imagery.
 """
 
     client = genai.Client(api_key=GEMINI_KEY)
@@ -136,25 +141,36 @@ Rules:
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.75, response_mime_type="application/json"),
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
             data = json.loads(response.text)
             scenes = data.get("scenes", [])
-            if len(scenes) != 3:
+            if len(scenes) != 2:
                 raise ValueError(f"Gemini returned {len(scenes)} scenes")
-            expected = [DATA["items"][:3], DATA["items"][3:7], DATA["items"][7:10]]
+
+            expected = [DATA["items"][:5], DATA["items"][5:10]]
+            narrations = [
+                "एक... दो... तीन... चार... पाँच! वाह, कितने सारे सेब!",
+                "छह... सात... आठ... नौ... दस! दस पूरे! शाबाश!",
+            ] if CATEGORY == "numbers" else None
+
             for i, scene in enumerate(scenes):
                 scene["items"] = expected[i]
-                scene.setdefault("narration", "")
-                scene.setdefault("visual", "")
-                scene.setdefault("camera", "cinematic medium tracking shot")
-                scene.setdefault("lighting", "soft warm cinematic light")
-                scene.setdefault("transition", "natural continuous movement")
+                # For counting, deterministic narration is better than AI-generated rushed prose.
+                if narrations:
+                    scene["narration"] = narrations[i]
+                else:
+                    scene.setdefault("narration", "चलो सीखें! बहुत बढ़िया!")
+                scene.setdefault("visual", "slowly point to and collect the objects one by one")
+                scene.setdefault("camera", "stable medium-wide gentle dolly, full body visible")
+                scene.setdefault("lighting", "warm soft morning light")
+
             data["category"] = CATEGORY
             data["exact_items"] = DATA["items"]
-            data["character"] = str(data.get("character", "cute white bunny with a yellow shirt"))
-            data["world"] = str(data.get("world", "bright magical fruit garden"))
-            print(f"🧠 Gemini learning plan: {data['title']} ({model})")
+            data["character"] = CHARACTER
+            data["world"] = WORLD
+            data["pacing"] = "slow educational 2x5-second scenes"
+            print(f"🧠 Gemini learning plan: {data.get('title', DATA['title'])} ({model})")
             return data
         except Exception as exc:
             last_error = exc
@@ -172,12 +188,12 @@ def pixazo_request(prompt, index):
         "prompt": prompt,
         "negative": NEGATIVE,
         "aspect": "9:16",
-        "num_frames": 81,
+        "num_frames": 121,
         "frame_rate": 24,
         "steps": 8,
         "cfg": 3.0,
     }
-    print(f"🎬 Pixazo FREE LTX scene {index + 1}/3")
+    print(f"🎬 Pixazo FREE LTX scene {index + 1}/2 (5 seconds, calm pacing)")
     r = requests.post(url, headers=headers, json=payload, timeout=90)
     if r.status_code >= 400:
         raise RuntimeError(f"Pixazo HTTP {r.status_code}: {r.text[:1500]}")
@@ -221,23 +237,37 @@ def download(url, path):
 
 
 def scene_prompt(plan, scene, index):
-    shot_plan = [
-        "START WIDE: beautiful high-angle establishing view of the world, then a slow cinematic crane/aerial-style reveal toward the full-body character. Show foreground depth and many environmental layers.",
-        "ACTION TRACK: smooth medium side-dolly/tracking shot or gentle overhead angle following the character as it physically counts/collects/reveals the objects. Strong parallax, readable full body.",
-        "HERO PAYOFF: energetic but controlled medium-wide hero shot with all final objects visible, then a gentle cinematic push toward the happy character. Finish on a clean celebratory composition."
-    ][index]
+    groups = ["FIRST FIVE", "SECOND FIVE"]
+    if index == 0:
+        shot = (
+            "5-SECOND SINGLE CONTINUOUS SHOT. Start medium-wide with the bunny full body and the garden clearly visible. "
+            "Use a very gentle side dolly while the bunny slowly points to five large apples in sequence, one at a time. "
+            "Keep the bunny centered and readable. End with a tiny happy clap. No fast movement, no cuts."
+        )
+    else:
+        shot = (
+            "5-SECOND SINGLE CONTINUOUS SHOT. Continue in the SAME garden with the SAME bunny. "
+            "Use a gentle stable camera arc around the bunny as it calmly reveals five more large apples in sequence. "
+            "Keep all five apples readable and finish with one cheerful small bounce. No fast movement, no cuts."
+        )
+
     return (
-        f"{CINEMATIC_BIBLE}\nCATEGORY: {CATEGORY}\nLESSON: {DATA['lesson']}\n"
-        f"FIXED CHARACTER: {plan.get('character','cute bunny')}\nFIXED WORLD: {plan.get('world','bright colorful garden')}\n"
-        f"EXACT LEARNING ITEMS FOR THIS SCENE: {json.dumps(scene.get('items', []), ensure_ascii=False)}\n"
-        f"SCENE ACTION: {scene.get('visual','')}\nCAMERA DIRECTOR NOTE: {scene.get('camera','')}\nSHOT PLAN: {shot_plan}\n"
-        f"LIGHTING: {scene.get('lighting','soft warm cinematic light')}\nCONTINUITY: {scene.get('transition','natural continuous movement')}\n"
-        "Make every learning object large, recognizable, colorful and physically plausible. Objects must not morph. "
+        f"{CINEMATIC_BIBLE}\n"
+        f"FIXED CHARACTER — ABSOLUTE: {CHARACTER}\n"
+        f"FIXED WORLD — ABSOLUTE: {WORLD}\n"
+        f"THIS IS SCENE {index+1} OF 2 ({groups[index]}).\n"
+        f"EXACT LEARNING ITEMS: {json.dumps(scene.get('items', []), ensure_ascii=False)}\n"
+        f"ACTION: {scene.get('visual', '')}\n"
+        f"CAMERA: {shot}\n"
+        f"LIGHTING: {scene.get('lighting', 'warm soft morning light')}\n"
+        "ABSOLUTE CONTINUITY: The only character is the white bunny described above. Do not introduce, replace, "
+        "or transform it into any other species. Same face, same ears, same blue overalls, same yellow bow tie, "
+        "same brown shoes, same colors, same proportions. Same garden.\n"
+        "Make exactly five large, recognizable apples visible in this scene. They stay solid and physically plausible. "
         "The AI scene itself must contain NO text, letters, numbers, subtitles, signs, logos or watermark."
     )
 
 
-# Burn exact learning labels ourselves; never ask the video model to render text.
 def make_learning_ass(scenes, path):
     def ts(x):
         m = int(x // 60)
@@ -248,19 +278,15 @@ def make_learning_ass(scenes, path):
         "[Script Info]", "ScriptType: v4.00+", "PlayResX: 1080", "PlayResY: 1920", "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        "Style: Learn,Noto Sans Devanagari,62,&H00FFFFFF,&H00FFFFFF,&H0015222D,&H99000000,1,0,0,0,100,100,0,0,1,4,2,2,55,55,180,1",
-        "Style: Big,Noto Sans,104,&H00FFFFFF,&H00FFFFFF,&H0015222D,&HAA000000,1,0,0,0,100,100,0,0,1,6,3,5,40,40,0,1",
-        "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+        "Style: Learn,Noto Sans Devanagari,58,&H00FFFFFF,&H00FFFFFF,&H0015222D,&H99000000,1,0,0,0,100,100,0,0,1,4,2,2,55,55,170,1",
+        "Style: Big,Noto Sans,96,&H00FFFFFF,&H00FFFFFF,&H0015222D,&HAA000000,1,0,0,0,100,100,0,0,1,6,3,5,40,40,0,1",
+        "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     start = 0.0
     for scene, slot in zip(scenes, SLOTS):
         end = min(10.0, start + slot)
         narration = str(scene.get("narration", "")).replace("{", "(").replace("}", ")")
-        items = scene.get("items", [])
-        if CATEGORY == "numbers":
-            label = "  •  ".join(items)
-        else:
-            label = "  •  ".join(items)
+        label = "  •  ".join(str(x) for x in scene.get("items", []))
         lines.append(f"Dialogue: 0,{ts(start)},{ts(end)},Big,,0,0,0,,{label}")
         lines.append(f"Dialogue: 1,{ts(start)},{ts(end)},Learn,,0,0,0,,{narration}")
         start = end
@@ -268,7 +294,8 @@ def make_learning_ass(scenes, path):
 
 
 async def tts(text, path):
-    await edge_tts.Communicate(text=text, voice="hi-IN-SwaraNeural", rate="+8%").save(str(path))
+    # Deliberately slower than the previous +8% setting.
+    await edge_tts.Communicate(text=text, voice="hi-IN-SwaraNeural", rate="-15%").save(str(path))
 
 
 def main():
@@ -280,39 +307,43 @@ def main():
 
     plan = gemini_learning_plan()
     scenes = plan["scenes"]
-    print(f"📚 Category: {CATEGORY}")
-    print(f"📖 {plan['title']}")
     META.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
     clips = []
     for i, scene in enumerate(scenes):
-        raw = WORK / f"pixazo_learning_clip_raw_{i}.mp4"
+        raw = WORK / f"pixazo_learning_scene_{i+1}.mp4"
         url = pixazo_request(scene_prompt(plan, scene, i), i)
         download(url, raw)
         clips.append(raw)
 
-    voices, sfxs = [], []
+    # Keep the final assembly exactly 10 seconds at 24fps.
+    silent = WORK / "pixazo_learning_silent.mp4"
+    av.assemble(clips, silent)
+
+    voices = []
+    sfxs = []
     for i, scene in enumerate(scenes):
-        raw_voice = WORK / f"pixazo_learning_voice_raw_{i}.mp3"
-        voice = WORK / f"pixazo_learning_voice_{i}.m4a"
-        fx = WORK / f"pixazo_learning_sfx_{i}.wav"
-        asyncio.run(tts(scene.get("narration", ""), raw_voice))
-        fit_voice(raw_voice, voice, SLOTS[i])
-        make_sfx(fx, sfx_kind(scene))
-        voices.append(voice)
-        sfxs.append(fx)
+        voice = WORK / f"pixazo_learning_voice_{i+1}.mp3"
+        asyncio.run(tts(str(scene.get("narration", "")), voice))
+        fitted = WORK / f"pixazo_learning_voice_{i+1}_fit.m4a"
+        av.fit_voice(voice, fitted, SLOTS[i])
+        voices.append(fitted)
 
-    video = WORK / "pixazo_learning_video.mp4"
-    assemble(clips, video)
+        sfx = WORK / f"pixazo_learning_sfx_{i+1}.wav"
+        av.make_sfx(sfx, "pop" if i == 0 else "sparkle")
+        sfxs.append(sfx)
+
     music = WORK / "pixazo_learning_music.wav"
-    make_music(music)
-    ass = WORK / "pixazo_learning_subtitles.ass"
-    make_learning_ass(scenes, ass)
+    av.make_music(music)
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    mux(video, music, voices, sfxs, ass, OUT)
-    print(f"✅ Pixazo + Gemini educational video: {OUT}")
-    print(f"📝 Learning metadata: {META}")
+    ass = WORK / "pixazo_learning.ass"
+    make_learning_ass(scenes, ass)
+    av.mux(silent, music, voices, sfxs, ass, OUT)
+
+    if not OUT.exists() or OUT.stat().st_size < 10000:
+        raise RuntimeError(f"Final video missing/invalid: {OUT}")
+    print(f"✅ FINAL: {OUT} ({OUT.stat().st_size / 1024 / 1024:.1f} MB)")
+    print("✅ Pacing: 2 scenes × 5 seconds | 24fps | slow Hindi narration | fixed bunny")
 
 
 if __name__ == "__main__":
