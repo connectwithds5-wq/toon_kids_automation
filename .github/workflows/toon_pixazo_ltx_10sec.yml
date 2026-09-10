@@ -59,28 +59,38 @@ jobs:
           echo "🎵 Rhyme category: $CONTENT_CATEGORY"
           echo "🧠 Gemini text: $GEMINI_TEXT_MODEL"
           echo "🎤 Gemini TTS: $GEMINI_TTS_MODEL"
+          echo "🥁 Rhythm: 124 BPM / 4-4"
 
-      - name: Validate rhyme pipeline
+      - name: Validate Rhyme Engine V2
         run: |
-          python -m py_compile src/pixazo_ltx_10sec_story_av.py src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py
+          python -m py_compile src/pixazo_rhyme_engine_v2.py src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py
           python -c "import edge_tts, gradio_client; print('✅ Runtime video dependencies import OK')"
-          echo "✅ Python syntax OK"
+          echo "✅ Rhyme Engine V2 syntax OK"
 
-      - name: Generate original Hindi nursery rhyme
-        run: python src/pixazo_ltx_10sec_story_av.py
+      - name: Generate original Hindi nursery rhyme V2
+        run: python src/pixazo_rhyme_engine_v2.py
 
       - name: Verify final rhyme media
         run: |
           test -s toon_pixazo_ltx_20sec_rhyme.mp4
           test -s pixazo_rhyme_metadata.json
+          DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nk=1 toon_pixazo_ltx_20sec_rhyme.mp4)
+          echo "🎬 FINAL DURATION: ${DURATION}s"
+          python - "$DURATION" <<'PY'
+          import sys
+          d=float(sys.argv[1])
+          assert d >= 19.95, f"Final video too short: {d:.3f}s"
+          assert d <= 20.10, f"Final video too long: {d:.3f}s"
+          print("✅ Exact 20-second duration gate passed")
+          PY
           ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_pixazo_ltx_20sec_rhyme.mp4
-          echo "----- GEMINI RHYME PLAN -----"
+          echo "----- GEMINI RHYTHME PLAN V2 -----"
           cat pixazo_rhyme_metadata.json
 
       - name: Upload rhyme video + metadata
         uses: actions/upload-artifact@v4
         with:
-          name: toon-kids-${{ inputs.category }}-rhyme-test
+          name: toon-kids-${{ inputs.category }}-rhyme-v2-test
           path: |
             toon_pixazo_ltx_20sec_rhyme.mp4
             pixazo_rhyme_metadata.json
