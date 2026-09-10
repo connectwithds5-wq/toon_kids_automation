@@ -12,7 +12,8 @@ jobs:
     timeout-minutes: 45
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_TEXT_MODEL: ${{ vars.GEMINI_TEXT_MODEL || 'gemini-2.5-flash-lite' }}
+      # Pin the production model. Do not inherit an old/invalid repository variable.
+      GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_WAN_SPACE: zerogpu-aoti/wan2-2-fp8da-aoti-faster
       HF_WAN_OUTPUT: toon_gemini_wan_production.mp4
@@ -34,7 +35,7 @@ jobs:
       - name: Validate configuration
         run: |
           test -n "$GEMINI_API_KEY" || (echo 'GEMINI_API_KEY secret is missing' && exit 1)
-          test -n "$GEMINI_TEXT_MODEL" || (echo 'GEMINI_TEXT_MODEL resolved empty' && exit 1)
+          test "$GEMINI_TEXT_MODEL" = "gemini-3.5-flash-lite" || (echo "Unexpected Gemini model: $GEMINI_TEXT_MODEL" && exit 1)
           echo "Gemini text model: $GEMINI_TEXT_MODEL"
           if [ -n "$HF_TOKEN" ]; then echo 'HF_TOKEN present — authenticated ZeroGPU quota'; else echo 'HF_TOKEN missing — anonymous ZeroGPU quota'; fi
       - name: Validate production code
