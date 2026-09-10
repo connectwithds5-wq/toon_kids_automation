@@ -9,7 +9,7 @@ permissions:
 jobs:
   pixazo-story:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       PIXAZO_API_KEY: ${{ secrets.PIXAZO_API_KEY }}
       PIXAZO_OUTPUT: toon_pixazo_ltx_10sec_story_av.mp4
@@ -43,7 +43,7 @@ jobs:
       - name: Validate Pixazo script
         run: python -m py_compile src/pixazo_ltx_10sec_story_av.py src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py
 
-      - name: Generate 10s Toon story with Pixazo LTX
+      - name: Generate 10s Toon story with Pixazo LTX FREE
         run: python src/pixazo_ltx_10sec_story_av.py
 
       - name: Verify final media
