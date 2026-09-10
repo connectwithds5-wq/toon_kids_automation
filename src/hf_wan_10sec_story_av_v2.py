@@ -16,7 +16,7 @@ HF_TOKEN = os.getenv("HF_TOKEN") or None
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_10sec_story_av_v2.mp4"))
 FINAL_SECONDS = 10.0
 CLIP_SECONDS = 3.5
-FPS = 16
+FPS = 24
 W, H = 1080, 1920
 SLOTS = [3.25, 3.35, 3.40]
 NEGATIVE = "blurry, low quality, distorted face, deformed body, extra limbs, bad anatomy, duplicate character, character morphing, face morphing, flicker, jitter, unstable clothing, unstable colors, text, letters, subtitles, logo, watermark, rectangle artifact, gray frame, noisy image"
@@ -50,7 +50,6 @@ def clean_anchor(story, scene, index):
     out = WORK / f"v2_anchor_{index}.png"
     scene_image(story, scene, index, raw)
     img = Image.open(raw).convert("RGB")
-    # Remove the old diagnostic badge that was visible as garbled text in the test.
     patch = img.crop((35, 35, 290, 155)).filter(ImageFilter.GaussianBlur(10))
     img.paste(patch.resize((255, 120)), (35, 35))
     img.save(out, quality=96)
@@ -88,7 +87,6 @@ def add_note(buf, start, length, freq, amp, rate=44100):
     for i in range(a,b):
         t=i/rate-start
         env=min(1,t/.025)*max(0,(length-t)/.14)
-        # simple bell/marimba timbre
         v=math.sin(2*math.pi*freq*t)+.35*math.sin(2*math.pi*2*freq*t)+.15*math.sin(2*math.pi*3*freq*t)
         buf[i]+=amp*v*max(0,env)
 
@@ -178,27 +176,5 @@ def mux(video,music,voices,sfxs,sub,out):
         mix += [f'[v{i}]',f'[s{i}]']; cursor+=slot
     filters.append(''.join(mix)+f'amix=inputs={len(mix)}:duration=longest:dropout_transition=0,loudnorm=I=-15.5:TP=-1.5:LRA=10[aout]')
     vf=f"subtitles='{sub.as_posix()}':fontsdir=/usr/share/fonts/truetype,setsar=1"
-    cmd += ['-filter_complex',';'.join(filters),'-map','0:v:0','-map','[aout]','-vf',vf,'-t',str(FINAL_SECONDS),'-c:v','libx264','-preset','veryfast','-crf','19','-r',str(FPS),'-pix_fmt','yuv420p','-c:a','aac','-b:a','160k','-ar','44100','-movflags','+faststart',str(out)]
+    cmd += ['-filter_complex',';'.join(filters),'-map','0:v','-map','[aout]','-vf',vf,'-c:v','libx264','-preset','veryfast','-crf','19','-r',str(FPS),'-pix_fmt','yuv420p','-c:a','aac','-b:a','192k','-shortest',str(out)]
     run(cmd)
-
-
-def main():
-    WORK.mkdir(exist_ok=True)
-    story=local_story(load_history()); scenes=story.get('scenes',[])[:3]
-    if len(scenes)<3: raise RuntimeError('Need at least 3 scenes')
-    print(f"📖 {story['title']}")
-    client=Client(SPACE,token=HF_TOKEN)
-    anchors=[clean_anchor(story,s,i) for i,s in enumerate(scenes)]
-    clips=[make_clip(client,story,s,i,anchors[i]) for i,s in enumerate(scenes)]
-    voices=[]; sfxs=[]
-    for i,s in enumerate(scenes):
-        raw=WORK/f'v2_voice_raw_{i}.mp3'; fit=WORK/f'v2_voice_{i}.m4a'; fx=WORK/f'v2_sfx_{i}.wav'
-        tts_sync(s.get('narration',''),raw); fit_voice(raw,fit,SLOTS[i]); make_sfx(fx,sfx_kind(s)); voices.append(fit); sfxs.append(fx)
-    video=WORK/'v2_video.mp4'; assemble(clips,video)
-    music=WORK/'v2_music.wav'; make_music(music)
-    ass=WORK/'v2_subtitles.ass'; make_ass(scenes,ass)
-    OUT.parent.mkdir(parents=True,exist_ok=True); mux(video,music,voices,sfxs,ass,OUT)
-    run(['ffprobe','-v','error','-show_entries','format=duration,size:stream=codec_type,codec_name,width,height,avg_frame_rate,sample_rate,channels','-of','default=noprint_wrappers=1',str(OUT)])
-    print(f'✅ {OUT}')
-
-if __name__=='__main__': main()
