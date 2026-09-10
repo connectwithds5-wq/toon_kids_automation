@@ -1,0 +1,59 @@
+name: Tiny Wonders - MiniMax H3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      MINIMAX_H3_SPACE: multimodalart/minimax-h3
+      MINIMAX_H3_STEPS: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-genai gradio_client
+
+      - name: Validate configuration
+        run: |
+          test -n "$GEMINI_API_KEY" || (echo 'GEMINI_API_KEY secret is missing' && exit 1)
+          test "$GEMINI_TEXT_MODEL" = "gemini-3.5-flash-lite" || (echo 'Unexpected Gemini model' && exit 1)
+          echo "Gemini: $GEMINI_TEXT_MODEL"
+          echo "MiniMax H3: $MINIMAX_H3_SPACE"
+          if [ -n "$HF_TOKEN" ]; then echo 'HF_TOKEN present'; else echo 'HF_TOKEN missing — using public Space access'; fi
+
+      - name: Validate code
+        run: python -m py_compile src/tiny_wonders_minimax.py
+
+      - name: Generate one Tiny Wonder
+        run: python src/tiny_wonders_minimax.py
+
+      - name: Media QA
+        run: |
+          test -s tiny_wonder.mp4
+          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 tiny_wonder.mp4
+
+      - name: Upload video artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny-wonder-minimax-h3
+          path: |
+            tiny_wonder.mp4
+            tiny_wonder_metadata.json
+          retention-days: 7
