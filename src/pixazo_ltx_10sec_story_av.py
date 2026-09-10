@@ -19,8 +19,7 @@ def pixazo_request(prompt, index):
     if not API_KEY:
         raise RuntimeError("PIXAZO_API_KEY is not set")
 
-    # Pixazo's current FREE LTX 2.5 endpoint is /ltx-video/v1/text-to-video.
-    # It is asynchronous: submit -> request_id -> poll -> media_url.
+    # Current Pixazo FREE LTX 2.5 endpoint.
     url = f"{API_BASE}/ltx-video/v1/text-to-video"
     headers = {
         "Content-Type": "application/json",
@@ -50,7 +49,11 @@ def pixazo_request(prompt, index):
     status_url = polling_url or f"{API_BASE}/v2/requests/status/{request_id}"
     print(f"   request_id={request_id}")
 
-    for _ in range(120):
+    # Pixazo's FREE queue can take longer than 10 minutes. The previous
+    # 120 x 5s loop caused a false timeout while the API was still PROCESSING.
+    # Allow up to 25 minutes per scene before declaring a real timeout.
+    max_polls = 300
+    for poll_no in range(1, max_polls + 1):
         time.sleep(5)
         sr = requests.get(
             status_url,
@@ -61,7 +64,9 @@ def pixazo_request(prompt, index):
             raise RuntimeError(f"Pixazo status HTTP {sr.status_code}: {sr.text[:1500]}")
         sd = sr.json()
         status = str(sd.get("status", "")).upper()
-        print(f"   Pixazo status: {status}")
+        elapsed_min = (poll_no * 5) / 60
+        if poll_no == 1 or poll_no % 12 == 0 or status != "PROCESSING":
+            print(f"   Pixazo status: {status} ({elapsed_min:.1f} min)")
 
         if status == "COMPLETED":
             output = sd.get("output", {})
@@ -75,7 +80,7 @@ def pixazo_request(prompt, index):
         if status in ("ERROR", "FAILED", "CANCELLED"):
             raise RuntimeError(f"Pixazo generation failed: {sd}")
 
-    raise TimeoutError("Pixazo generation timed out after 10 minutes")
+    raise TimeoutError("Pixazo generation timed out after 25 minutes")
 
 
 def download(url, path):
