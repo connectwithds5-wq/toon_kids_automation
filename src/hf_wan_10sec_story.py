@@ -8,17 +8,17 @@ from gradio_client import Client
 from toon_kids_story import WORK, local_story, load_history
 from nursery_rhyme import local_rhyme
 
-# Proven fast Wan 2.2 ZeroGPU Space, using TEXT-TO-VIDEO only.
-# No anchor image, Z-Image, Gemini, or image-to-video stage.
-SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
+# IMPORTANT: this is the actual Wan 2.2 14B T2V Space.
+# It takes TEXT only. No anchor image, Gemini, Z-Image or I2V is used.
+SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 CONTENT_MODE = os.getenv("CONTENT_MODE", "story").lower()
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_10sec_story.mp4"))
 CLIP_SECONDS = 3.5
 FINAL_SECONDS = 10.0
-WAN_STEPS = int(os.getenv("WAN_STEPS", "6"))
-WAN_CFG = float(os.getenv("WAN_CFG", "1.0"))
-WAN_SHIFT = float(os.getenv("WAN_SHIFT", "1.0"))
+WAN_STEPS = int(os.getenv("WAN_STEPS", "4"))
+WAN_GUIDANCE = float(os.getenv("WAN_GUIDANCE", "1.0"))
+WAN_GUIDANCE_2 = float(os.getenv("WAN_GUIDANCE_2", "3.0"))
 
 
 def extract_video_path(result):
@@ -42,25 +42,20 @@ def extract_video_path(result):
     raise RuntimeError(f"Unsupported Wan result: {result!r}")
 
 
-def is_quota_error(exc):
-    text = str(exc).lower()
-    return any(x in text for x in ("zerogpu quota", "quota exceeded", "0s left"))
-
-
 def make_clip(client, story, scene, index):
     clip_path = WORK / f"wan_10sec_scene_{index + 1}.mp4"
     character = story.get("character", "cute animated animal")
     prompt = (
         "Premium high-end 3D CGI children's animated musical feature film. "
         f"Main character: {character}. "
-        f"Action: {scene.get('visual', '')}. "
+        f"Story action: {scene.get('visual', '')}. "
         f"Camera: {scene.get('camera', 'smooth cinematic tracking shot')}. "
-        "Create the scene directly from text as a fully rendered dimensional 3D animation. "
-        "Cute expressive character, polished studio CGI, detailed materials and fur, realistic lighting, "
-        "volumetric light, cinematic depth of field, optical bokeh, realistic shadows, filmic color grading, "
-        "smooth physically believable movement, clear foreground and background depth, joyful nursery-rhyme energy. "
-        "Keep the character design coherent throughout the shot. No text, subtitles, letters, logo or watermark."
-    )[:1200]
+        "Generate the complete scene directly from this text as dimensional CGI animation. "
+        "Cute expressive character, polished studio rendering, detailed materials/fur, volumetric lighting, "
+        "cinematic rim light, realistic shadows, depth of field, optical bokeh, atmospheric perspective, "
+        "filmic color grading, smooth physically believable motion and clear foreground/midground/background depth. "
+        "Joyful nursery-rhyme energy, child-friendly premium animation. No text, subtitles, letters, logo or watermark."
+    )[:1500]
     negative_prompt = (
         "flat vector art, 2D illustration, sticker, emoji, clip-art, worksheet, flat cartoon, flat fills, "
         "ink outlines, poster, cel-shaded illustration, blurry, low quality, distorted face, deformed body, "
@@ -68,14 +63,14 @@ def make_clip(client, story, scene, index):
         "frame tearing, unstable colors, text, subtitles, logo, watermark, gray frame, noise"
     )
 
-    print(f"[Scene {index + 1}/3] Wan 2.2 T2V — {CLIP_SECONDS}s")
+    print(f"[Scene {index + 1}/3] Wan 2.2 14B T2V — {CLIP_SECONDS}s")
     result = client.predict(
         prompt,
         negative_prompt,
-        WAN_STEPS,
         CLIP_SECONDS,
-        WAN_CFG,
-        WAN_SHIFT,
+        WAN_GUIDANCE,
+        WAN_GUIDANCE_2,
+        WAN_STEPS,
         1000 + index,
         False,
         api_name="/generate_video",
@@ -113,21 +108,11 @@ def main():
     print(f"Title: {story['title']}")
     print("Plan: 3 Wan 2.2 T2V scenes x 3.5s, exact 10s final video.")
     print(f"HF_TOKEN configured: {'yes' if HF_TOKEN else 'no (anonymous ZeroGPU)'}")
-    print("ENGINE: Wan 2.2 T2V ONLY — no image generation.")
+    print(f"ENGINE: {SPACE} — Wan 2.2 14B T2V ONLY")
+    print("No image generation stage is used.")
 
     client = Client(SPACE, token=HF_TOKEN) if HF_TOKEN else Client(SPACE)
-    clips = []
-    for index, scene in enumerate(scenes):
-        try:
-            clips.append(make_clip(client, story, scene, index))
-        except Exception as exc:
-            if HF_TOKEN and is_quota_error(exc):
-                print("[Wan fallback] Authenticated ZeroGPU quota exhausted; retrying anonymously...")
-                client = Client(SPACE)
-                clips.append(make_clip(client, story, scene, index))
-            else:
-                raise
-
+    clips = [make_clip(client, story, scene, i) for i, scene in enumerate(scenes)]
     concat_and_trim(clips)
     subprocess.run([
         "ffprobe", "-v", "error", "-show_entries", "format=duration,size",
