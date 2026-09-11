@@ -8,17 +8,17 @@ from gradio_client import Client
 from toon_kids_story import WORK, local_story, load_history
 from nursery_rhyme import local_rhyme
 
-# Wan 2.2 14B Text-to-Video ZeroGPU Space.
-# No Gemini, Z-Image, or any other image model is used.
-SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti")
+# Proven fast Wan 2.2 ZeroGPU Space, using TEXT-TO-VIDEO only.
+# No anchor image, Z-Image, Gemini, or image-to-video stage.
+SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 CONTENT_MODE = os.getenv("CONTENT_MODE", "story").lower()
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_10sec_story.mp4"))
-CLIP_SECONDS = 5.0
+CLIP_SECONDS = 3.5
 FINAL_SECONDS = 10.0
-WAN_STEPS = int(os.getenv("WAN_STEPS", "4"))
-WAN_GUIDANCE = float(os.getenv("WAN_GUIDANCE", "1.0"))
-WAN_GUIDANCE_2 = float(os.getenv("WAN_GUIDANCE_2", "3.0"))
+WAN_STEPS = int(os.getenv("WAN_STEPS", "6"))
+WAN_CFG = float(os.getenv("WAN_CFG", "1.0"))
+WAN_SHIFT = float(os.getenv("WAN_SHIFT", "1.0"))
 
 
 def extract_video_path(result):
@@ -42,38 +42,40 @@ def extract_video_path(result):
     raise RuntimeError(f"Unsupported Wan result: {result!r}")
 
 
+def is_quota_error(exc):
+    text = str(exc).lower()
+    return any(x in text for x in ("zerogpu quota", "quota exceeded", "0s left"))
+
+
 def make_clip(client, story, scene, index):
     clip_path = WORK / f"wan_10sec_scene_{index + 1}.mp4"
     character = story.get("character", "cute animated animal")
     prompt = (
-        "Premium theatrical 3D CGI children's musical feature film, high-end dimensional animation. "
-        f"MAIN CHARACTER: {character}. "
-        f"STORY BEAT: {scene.get('visual', '')}. "
-        f"CAMERA: {scene.get('camera', 'smooth cinematic tracking shot')}. "
-        "Keep the main character visually consistent throughout this shot: same face, colors, clothing, "
-        "body proportions and recognizable design. Cute expressive face, polished physically based CGI, "
-        "detailed materials/fur, volumetric lighting, cinematic rim light, realistic contact shadows, "
-        "depth of field, optical bokeh, atmospheric perspective, filmic color grading. "
-        "Dynamic but physically believable motion, clear foreground/midground/background separation, "
-        "joyful nursery-rhyme energy, child-friendly and premium studio quality. "
-        "No text, subtitles, letters, logo or watermark."
-    )[:1500]
+        "Premium high-end 3D CGI children's animated musical feature film. "
+        f"Main character: {character}. "
+        f"Action: {scene.get('visual', '')}. "
+        f"Camera: {scene.get('camera', 'smooth cinematic tracking shot')}. "
+        "Create the scene directly from text as a fully rendered dimensional 3D animation. "
+        "Cute expressive character, polished studio CGI, detailed materials and fur, realistic lighting, "
+        "volumetric light, cinematic depth of field, optical bokeh, realistic shadows, filmic color grading, "
+        "smooth physically believable movement, clear foreground and background depth, joyful nursery-rhyme energy. "
+        "Keep the character design coherent throughout the shot. No text, subtitles, letters, logo or watermark."
+    )[:1200]
     negative_prompt = (
-        "flat vector art, 2D illustration, sticker, emoji, clip-art, worksheet, simple geometric shapes, "
-        "flat fills, ink outlines, poster, cel-shaded illustration, low quality, blurry, static frame, "
-        "distorted face, deformed body, extra limbs, missing limbs, bad anatomy, duplicate character, "
-        "flicker, jitter, frame tearing, unstable colors, text, subtitles, logo, watermark, gray frame, noise"
+        "flat vector art, 2D illustration, sticker, emoji, clip-art, worksheet, flat cartoon, flat fills, "
+        "ink outlines, poster, cel-shaded illustration, blurry, low quality, distorted face, deformed body, "
+        "extra limbs, missing limbs, bad anatomy, duplicate character, morphing, face morphing, flicker, jitter, "
+        "frame tearing, unstable colors, text, subtitles, logo, watermark, gray frame, noise"
     )
 
-    print(f"[Wan 2.2] Scene {index + 1}/2: generating {CLIP_SECONDS}s T2V clip...")
-    print(f"[Wan 2.2] Space: {SPACE} | steps={WAN_STEPS} | guidance={WAN_GUIDANCE}/{WAN_GUIDANCE_2}")
+    print(f"[Scene {index + 1}/3] Wan 2.2 T2V — {CLIP_SECONDS}s")
     result = client.predict(
         prompt,
         negative_prompt,
-        CLIP_SECONDS,
-        WAN_GUIDANCE,
-        WAN_GUIDANCE_2,
         WAN_STEPS,
+        CLIP_SECONDS,
+        WAN_CFG,
+        WAN_SHIFT,
         1000 + index,
         False,
         api_name="/generate_video",
@@ -94,13 +96,8 @@ def concat_and_trim(clips):
         "-t", str(FINAL_SECONDS), "-an", "-c:v", "libx264", "-preset", "veryfast",
         "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(OUT),
     ]
-    print("Assembling the 10-second Wan 2.2 cinematic video...")
+    print("Assembling the 10-second Wan 2.2 T2V video...")
     subprocess.run(cmd, check=True)
-
-
-def _is_quota_error(exc):
-    text = str(exc).lower()
-    return any(term in text for term in ("zerogpu quota", "quota exceeded", "0s left", "no gpu was available"))
 
 
 def main():
@@ -112,46 +109,26 @@ def main():
     if len(scenes) < 3:
         raise RuntimeError("The selected content must contain at least 3 scenes.")
 
-    # Two 5-second Wan generations keep the final video at exactly 10 seconds while
-    # staying within the current Free/anonymous ZeroGPU budget much better than 3 calls.
-    wan_scenes = [
-        {
-            "visual": f"FIRST BEAT: {scenes[0].get('visual', '')} Then naturally continue into SECOND BEAT: {scenes[1].get('visual', '')}",
-            "camera": f"{scenes[0].get('camera', 'wide cinematic establishing shot')}, then smoothly transition into {scenes[1].get('camera', 'gentle tracking shot')}",
-        },
-        {
-            "visual": scenes[2].get("visual", "joyful final nursery-rhyme moment"),
-            "camera": scenes[2].get("camera", "smooth cinematic closing shot"),
-        },
-    ]
-
     print(f"Content mode: {CONTENT_MODE}")
     print(f"Title: {story['title']}")
-    print("Plan: 2 Wan 2.2 T2V scenes x 5s = exact 10s final video.")
+    print("Plan: 3 Wan 2.2 T2V scenes x 3.5s, exact 10s final video.")
     print(f"HF_TOKEN configured: {'yes' if HF_TOKEN else 'no (anonymous ZeroGPU)'}")
-    print("Video engine: Wan 2.2 14B T2V only — no Z-Image/Gemini image generation.")
+    print("ENGINE: Wan 2.2 T2V ONLY — no image generation.")
 
     client = Client(SPACE, token=HF_TOKEN) if HF_TOKEN else Client(SPACE)
     clips = []
-    for index, scene in enumerate(wan_scenes):
+    for index, scene in enumerate(scenes):
         try:
             clips.append(make_clip(client, story, scene, index))
         except Exception as exc:
-            # The current run showed the authenticated account at 0s quota. Retry once
-            # without the token so the request can use HF's anonymous shared ZeroGPU pool.
-            if HF_TOKEN and _is_quota_error(exc):
-                print("[Wan 2.2 fallback] Authenticated ZeroGPU quota exhausted; retrying anonymously.")
+            if HF_TOKEN and is_quota_error(exc):
+                print("[Wan fallback] Authenticated ZeroGPU quota exhausted; retrying anonymously...")
                 client = Client(SPACE)
                 clips.append(make_clip(client, story, scene, index))
             else:
                 raise
 
     concat_and_trim(clips)
-
-    # nursery_audio_mix.py monkey-patches this function with the full soundtrack mixer.
-    if is_rhyme and "add_rhyme_audio" in globals():
-        add_rhyme_audio(OUT, story)
-
     subprocess.run([
         "ffprobe", "-v", "error", "-show_entries", "format=duration,size",
         "-of", "default=noprint_wrappers=1", str(OUT)
