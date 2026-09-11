@@ -13,7 +13,16 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      # Gemini 3.1 Flash Image has no Free Tier quota for image generation.
+      # Keep it disabled here; the script uses the free HF ZeroGPU Z-Image-Turbo
+      # Space first and falls back to the local renderer if its daily quota is exhausted.
+      GEMINI_IMAGE_ENABLED: "false"
       GEMINI_IMAGE_MODEL: gemini-3.1-flash-image
+      ZIMAGE_ENABLED: "true"
+      ZIMAGE_SPACE: mrfakename/Z-Image-Turbo
+      ZIMAGE_WIDTH: "864"
+      ZIMAGE_HEIGHT: "1536"
+      ZIMAGE_STEPS: "9"
       HF_WAN_SPACE: zerogpu-aoti/wan2-2-fp8da-aoti-faster
       HF_WAN_OUTPUT: toon_wan_10sec_story.mp4
       INPUT_VIDEO: toon_wan_10sec_story.mp4
