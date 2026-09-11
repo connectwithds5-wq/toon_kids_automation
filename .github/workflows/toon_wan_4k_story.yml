@@ -33,14 +33,15 @@ jobs:
           python-version: "3.11"
 
       - name: Install FFmpeg and fonts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: ffmpeg fonts-noto-core fonts-noto-extra
+          version: 1.0
 
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install edge-tts pillow gradio_client
+          pip install edge-tts gradio_client pillow
 
       - name: Validate pipeline
         run: |
