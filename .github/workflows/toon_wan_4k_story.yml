@@ -1,4 +1,4 @@
-name: Toon Story - Wan 2.2 Free ZeroGPU + 4K Master
+name: Toon Story - Wan 2.2 Cinematic + 4K Master
 
 on:
   workflow_dispatch:
@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 60
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_IMAGE_MODEL: gemini-3.1-flash-image
       HF_WAN_SPACE: zerogpu-aoti/wan2-2-fp8da-aoti-faster
       HF_WAN_OUTPUT: toon_wan_10sec_story.mp4
       INPUT_VIDEO: toon_wan_10sec_story.mp4
@@ -41,10 +43,10 @@ jobs:
         run: |
           python -m py_compile src/hf_wan_10sec_story.py src/toon_kids_story.py src/upscale_vertical_4k.py
 
-      - name: Generate Toon story with Wan 2.2
+      - name: Generate cinematic Toon story with Wan 2.2
         run: python src/hf_wan_10sec_story.py
 
-      - name: Verify Wan master
+      - name: Verify Wan cinematic master
         run: |
           test -s toon_wan_10sec_story.mp4
           ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_wan_10sec_story.mp4
@@ -58,9 +60,9 @@ jobs:
           ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate -of default=noprint_wrappers=1 toon_wan_10sec_story_4k.mp4
           ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 toon_wan_10sec_story_4k.mp4
 
-      - name: Upload 4K story
+      - name: Upload 4K cinematic story
         uses: actions/upload-artifact@v4
         with:
-          name: toon-wan-10sec-story-4k
+          name: toon-wan-10sec-cinematic-4k
           path: toon_wan_10sec_story_4k.mp4
           retention-days: 3
