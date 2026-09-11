@@ -20,6 +20,9 @@ jobs:
       ZIMAGE_WIDTH: "864"
       ZIMAGE_HEIGHT: "1536"
       ZIMAGE_STEPS: "9"
+      AI_MUSIC_ENABLED: "true"
+      AI_MUSIC_SPACE: ACloudCenter/ACE-Music-Generator
+      AI_MUSIC_DURATION: "12"
       CONTENT_MODE: nursery_rhyme
       CINEMATIC_ONLY: "true"
       HF_WAN_SPACE: zerogpu-aoti/wan2-2-fp8da-aoti-faster
@@ -52,7 +55,7 @@ jobs:
         run: |
           python -m py_compile src/hf_wan_10sec_story.py src/nursery_rhyme.py src/nursery_audio_mix.py src/toon_kids_story.py src/upscale_vertical_4k.py
 
-      - name: Generate cinematic nursery rhyme with Wan 2.2 + full soundtrack
+      - name: Generate cinematic nursery rhyme with Wan 2.2 + AI sung soundtrack
         run: python src/nursery_audio_mix.py
 
       - name: Verify Wan cinematic nursery-rhyme master + audio
