@@ -1,6 +1,5 @@
 import asyncio
 import math
-import os
 import shutil
 import subprocess
 import wave
@@ -9,9 +8,8 @@ from pathlib import Path
 from hf_wan_10sec_story import WORK, OUT, FINAL_SECONDS, main as video_main
 
 RATE = 48000
-AI_MUSIC_ENABLED = os.getenv("AI_MUSIC_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-AI_MUSIC_SPACE = os.getenv("AI_MUSIC_SPACE", "ACloudCenter/ACE-Music-Generator")
-AI_MUSIC_DURATION = float(os.getenv("AI_MUSIC_DURATION", "12"))
+_anchor_cache = None
+_original_anchor = None
 
 
 def _tone(buf, start, duration, freq, amp=0.1, decay=1.0, harmonics=1):
@@ -66,7 +64,7 @@ def _clap(buf, start, amp=0.06):
 
 
 def make_music(path):
-    """Offline fallback nursery-pop backing track."""
+    """Create a richer original nursery-pop backing track."""
     total = int(FINAL_SECONDS * RATE)
     buf = [0.0] * total
     chords = [
@@ -84,12 +82,16 @@ def make_music(path):
         base = bar * 2.5
         for beat in range(4):
             _tone(buf, base + beat * 0.625, 0.40, note, amp=0.075, decay=0.75)
-    melody = [523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 659.25, 698.46, 783.99, 880.00, 783.99, 698.46, 659.25, 587.33, 659.25]
+    melody = [
+        523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 659.25,
+        698.46, 783.99, 880.00, 783.99, 698.46, 659.25, 587.33, 659.25,
+    ]
     for i, note in enumerate(melody):
         start = i * 0.625
         _pluck(buf, start, 0.52, note, amp=0.105)
         _tone(buf, start + 0.01, 0.28, note * 2, amp=0.014, decay=1.8, harmonics=2)
-    for start, note in [(1.56, 783.99), (3.43, 587.33), (5.93, 783.99), (7.81, 659.25), (9.18, 783.99)]:
+    answers = [(1.56, 783.99), (3.43, 587.33), (5.93, 783.99), (7.81, 659.25), (9.18, 783.99)]
+    for start, note in answers:
         _pluck(buf, start, 0.30, note, amp=0.055)
     for beat in range(20):
         t = beat * 0.5
@@ -144,84 +146,42 @@ async def make_voice(text, path):
     await edge_tts.Communicate(text=text, voice="hi-IN-SwaraNeural", rate="-8%", pitch="+1Hz").save(str(path))
 
 
-def generate_ai_rhyme(rhyme, path):
-    """Generate a sung nursery rhyme through a free Hugging Face ACE-Step Space."""
-    if not AI_MUSIC_ENABLED:
-        return False
-    try:
-        from gradio_client import Client
-        token = os.getenv("HF_TOKEN") or None
-        print(f"🎼 AI music: connecting to free ACE-Step Space {AI_MUSIC_SPACE}...")
-        client = Client(AI_MUSIC_SPACE, token=token)
-        tags = (
-            "Indian Hindi nursery rhyme, preschool children's song, joyful bright major key, "
-            "catchy sing-along melody, playful child-friendly vocal, clear Hindi pronunciation, "
-            "ukulele, toy piano, marimba, glockenspiel, hand claps, light kick and percussion, "
-            "warm bass, magical bells, cute cartoon energy, simple memorable hook, upbeat 118 bpm, "
-            "clean modern kids YouTube production, no rap, no spoken narration"
-        )
-        result = client.predict(
-            AI_MUSIC_DURATION,
-            tags,
-            rhyme,
-            60,
-            15.0,
-            api_name="/generate",
-        )
-        source = result[0] if isinstance(result, (tuple, list)) else result
-        if not source:
-            raise RuntimeError("ACE-Step returned an empty audio result")
-        source_path = Path(str(source))
-        if not source_path.exists():
-            raise RuntimeError(f"ACE-Step returned a missing audio file: {source_path}")
-        shutil.copy2(source_path, path)
-        print(f"✅ AI sung rhyme created: {path}")
-        return True
-    except Exception as exc:
-        print(f"⚠️ AI music unavailable; using local fallback: {exc}")
-        return False
+def _quota_safe_anchor(story, scene, index, output_path, reference_path=None):
+    """Generate one cinematic anchor only; reuse it for all Wan scenes."""
+    global _anchor_cache
+    if _anchor_cache is not None and _anchor_cache.is_file():
+        shutil.copy2(_anchor_cache, output_path)
+        print(f"[Scene {index + 1}/3] Reusing Scene 1 cinematic anchor (ZeroGPU quota-safe).")
+        return "scene-1-anchor-reuse"
+    source_type = _original_anchor(story, scene, index, output_path, reference_path)
+    _anchor_cache = Path(output_path)
+    print(f"[Anchor] Locked cinematic identity from Scene {index + 1}: {source_type}")
+    return source_type
 
 
 def add_rhyme_audio(video, story):
     music = WORK / "nursery_music.wav"
     sfx = WORK / "nursery_sfx.wav"
     voice = WORK / "nursery_rhyme_voice.mp3"
-    ai_music = WORK / "nursery_ai_rhyme.mp3"
+    make_music(music)
+    make_sfx(sfx)
     rhyme = story.get("rhyme") or " ".join(scene.get("narration", "") for scene in story.get("scenes", [])[:3])
     if not rhyme.strip():
         raise RuntimeError("Nursery rhyme text is empty; refusing to publish a silent narration track.")
-
-    ai_ok = generate_ai_rhyme(rhyme, ai_music)
-    make_sfx(sfx)
-
-    if ai_ok:
-        print("🎵 Using AI-generated sung rhyme as the main soundtrack.")
-        audio_inputs = [str(ai_music), str(sfx)]
-        filter_complex = (
-            "[1:a]aresample=48000,volume=0.92[m];"
-            "[2:a]aresample=48000,volume=0.52[s];"
-            "[m][s]amix=inputs=2:duration=longest:dropout_transition=0:weights='1 0.45',"
-            "loudnorm=I=-14:TP=-1.5:LRA=9[aout]"
-        )
-    else:
-        make_music(music)
-        asyncio.run(make_voice(rhyme, voice))
-        print("🎵 Using local fallback: music + Hindi voice + SFX.")
-        audio_inputs = [str(music), str(voice), str(sfx)]
-        filter_complex = (
-            "[1:a]aresample=48000,volume=0.78[m];"
-            "[2:a]aresample=48000,acompressor=threshold=-20dB:ratio=2.2:attack=5:release=120,volume=1.18[v];"
-            "[3:a]aresample=48000,volume=0.82[s];"
-            "[m][v]sidechaincompress=threshold=0.025:ratio=3.5:attack=15:release=280[duck];"
-            "[duck][s][v]amix=inputs=3:duration=longest:dropout_transition=0:weights='1 0.9 1.3',"
-            "loudnorm=I=-14:TP=-1.5:LRA=9[aout]"
-        )
-
+    print("🎵 Creating full nursery soundtrack: richer music + SFX + Hindi voice...")
+    print(f"🗣️ Rhyme: {rhyme}")
+    asyncio.run(make_voice(rhyme, voice))
     out = OUT.with_name(OUT.stem + "_av.mp4")
-    cmd = ["ffmpeg", "-y", "-i", str(video)]
-    for audio in audio_inputs:
-        cmd += ["-i", audio]
-    cmd += [
+    filter_complex = (
+        "[1:a]aresample=48000,volume=0.78[m];"
+        "[2:a]aresample=48000,acompressor=threshold=-20dB:ratio=2.2:attack=5:release=120,volume=1.18[v];"
+        "[3:a]aresample=48000,volume=0.82[s];"
+        "[m][v]sidechaincompress=threshold=0.025:ratio=3.5:attack=15:release=280[duck];"
+        "[duck][s][v]amix=inputs=3:duration=longest:dropout_transition=0:weights='1 0.9 1.3',"
+        "loudnorm=I=-14:TP=-1.5:LRA=9[aout]"
+    )
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video), "-i", str(music), "-i", str(voice), "-i", str(sfx),
         "-filter_complex", filter_complex,
         "-map", "0:v", "-map", "[aout]", "-t", str(FINAL_SECONDS),
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
@@ -231,8 +191,19 @@ def add_rhyme_audio(video, story):
     out.replace(video)
 
 
+if __name__ == "main__":
+    import hf_wan_10sec_story as pipeline
+    _original_anchor = pipeline.generate_cinematic_anchor
+    pipeline.generate_cinematic_anchor = _quota_safe_anchor
+    pipeline.add_rhyme_audio = add_rhyme_audio
+    pipeline.make_voice = make_voice
+    video_main()
+
+
 if __name__ == "__main__":
     import hf_wan_10sec_story as pipeline
+    _original_anchor = pipeline.generate_cinematic_anchor
+    pipeline.generate_cinematic_anchor = _quota_safe_anchor
     pipeline.add_rhyme_audio = add_rhyme_audio
     pipeline.make_voice = make_voice
     video_main()
