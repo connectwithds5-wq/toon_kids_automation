@@ -127,10 +127,14 @@ simple geometric shapes, cel-shaded poster, text, captions, letters, logo, water
 
 def _generate_zimage_anchor(story, scene, index, output_path):
     global _zimage_client
-    if not HF_TOKEN:
-        raise RuntimeError("HF_TOKEN is required for the free ZeroGPU image generator")
     if _zimage_client is None:
-        _zimage_client = Client(ZIMAGE_SPACE, token=HF_TOKEN)
+        if HF_TOKEN:
+            print("[Z-Image] HF_TOKEN configured; using authenticated ZeroGPU session.")
+            _zimage_client = Client(ZIMAGE_SPACE, token=HF_TOKEN)
+        else:
+            print("[Z-Image] HF_TOKEN not configured; using anonymous ZeroGPU session.")
+            print("[Z-Image] Anonymous access has a smaller daily quota; add HF_TOKEN later for higher quota/priority.")
+            _zimage_client = Client(ZIMAGE_SPACE)
     character = story.get("character", "cute animated animal")
     action = scene.get("visual", "")
     camera = scene.get("camera", "cinematic tracking shot")
@@ -287,6 +291,7 @@ def main():
     print(f"Content mode: {CONTENT_MODE}")
     print(f"Title: {story['title']}")
     print("Plan: 3 cinematic scenes x 3.5s, exact 10s final video.")
+    print(f"HF_TOKEN configured: {'yes' if HF_TOKEN else 'no (anonymous ZeroGPU fallback)'}")
     client = Client(SPACE, token=HF_TOKEN)
     character_reference = WORK / "wan_cinematic_character_reference.png"
     clips = [make_clip(client, story, scene, i, character_reference) for i, scene in enumerate(scenes)]
