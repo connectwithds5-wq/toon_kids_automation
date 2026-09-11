@@ -20,12 +20,13 @@ ZIMAGE_ENABLED = os.getenv("ZIMAGE_ENABLED", "true").lower() == "true"
 ZIMAGE_WIDTH = int(os.getenv("ZIMAGE_WIDTH", "864"))
 ZIMAGE_HEIGHT = int(os.getenv("ZIMAGE_HEIGHT", "1536"))
 ZIMAGE_STEPS = int(os.getenv("ZIMAGE_STEPS", "9"))
+# Never silently downgrade a cinematic production to the old flat PIL renderer.
+# Set false only when a basic emergency fallback is explicitly desired.
+CINEMATIC_ONLY = os.getenv("CINEMATIC_ONLY", "true").lower() == "true"
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_10sec_story.mp4"))
 CLIP_SECONDS = 3.5
 FINAL_SECONDS = 10.0
 
-# Runtime circuit breakers. Hard quota/configuration failures are not retried
-# for every scene; the next provider is selected immediately.
 _gemini_disabled_reason = None
 _zimage_disabled_reason = None
 _zimage_client = None
@@ -82,35 +83,28 @@ def _generate_gemini_anchor(story, scene, output_path, reference_path=None):
         raise RuntimeError("GEMINI_API_KEY is not configured")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    character = story.get("character", "cute cartoon animal")
+    character = story.get("character", "cute animated animal")
     action = scene.get("visual", "")
     camera = scene.get("camera", "cinematic tracking shot")
-
     prompt = f"""
-Create a premium cinematic 3D animated children's movie frame in a vertical 9:16 composition.
-This is an original family-friendly animated film, not a flat illustration and not a vector/cartoon icon.
+Create a premium feature-film CGI still from an original children's adventure movie, vertical 9:16.
 
-MAIN CHARACTER — keep this exact identity in every scene:
-{character}
+The image MUST look like high-end theatrical 3D computer graphics, not a drawing.
+Use physically based materials, detailed fur, realistic surface shading, soft global illumination,
+volumetric light, cinematic rim light, natural lens perspective, depth of field, bokeh,
+atmospheric perspective, realistic shadows, rich production-design detail and professional film color grading.
+No visible ink outlines. No flat fills. No poster/vector treatment.
 
-SCENE ACTION:
-{action}
+MAIN CHARACTER (identity must remain consistent): {character}
+SCENE ACTION: {action}
+CAMERA: {camera}
 
-CAMERA / COMPOSITION:
-{camera}. Strong cinematic composition with foreground, midground and background depth; natural lens perspective;
-tasteful shallow depth of field; subject clearly separated from background.
+The final frame should feel like a polished studio animated feature: dimensional characters,
+real depth, believable lighting, cinematic composition, foreground/midground/background separation.
+Cute and family-friendly, but visually sophisticated and filmic.
 
-VISUAL STYLE:
-High-end theatrical 3D animation, expressive but believable character, detailed fur/materials, physically based textures,
-soft global illumination, volumetric light rays, subtle rim lighting, realistic shadows, atmospheric perspective,
-rich environment detail, cinematic color grading, beautiful bokeh, polished feature-film rendering,
-emotionally warm children's adventure movie.
-Use a slightly low cinematic camera angle where appropriate, dynamic staging, and intentional negative space.
-
-IMPORTANT:
-Do NOT make it look like a 2D/vector drawing, sticker, emoji, flat graphic, clip-art, children's worksheet,
-or simple geometric cartoon. No text, no captions, no letters, no logo, no watermark.
-No borders or UI elements.
+ABSOLUTELY NO: 2D art, vector art, flat cartoon, sticker, emoji, clip-art, children's worksheet,
+simple geometric shapes, cel-shaded poster, text, captions, letters, logo, watermark, UI or borders.
 """.strip()
 
     contents = [prompt]
@@ -118,26 +112,17 @@ No borders or UI elements.
         with Image.open(reference_path) as reference_image:
             contents.append(reference_image.copy())
         contents.append(
-            "Use the supplied reference image ONLY to preserve the main character's identity, face, "
-            "colors, clothing and proportions. Redesign the scene as a premium cinematic 3D film frame; "
-            "do not copy the flat/vector rendering style of the reference."
+            "Use this reference ONLY for the character's identity, face, colors, clothing and proportions. "
+            "Re-render everything as high-end theatrical 3D CGI with physically based materials and cinematic lighting. "
+            "Do not inherit the reference's illustration or vector rendering style."
         )
 
     config = types.GenerateContentConfig(
         response_modalities=["IMAGE"],
-        image_config=types.ImageConfig(
-            aspect_ratio="9:16",
-            image_size="2K",
-        ),
+        image_config=types.ImageConfig(aspect_ratio="9:16", image_size="2K"),
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
-
-    response = client.models.generate_content(
-        model=GEMINI_IMAGE_MODEL,
-        contents=contents,
-        config=config,
-    )
-
+    response = client.models.generate_content(model=GEMINI_IMAGE_MODEL, contents=contents, config=config)
     for part in response.parts:
         if part.inline_data is not None:
             part.as_image().save(output_path)
@@ -148,8 +133,7 @@ No borders or UI elements.
 def _generate_zimage_anchor(story, scene, index, output_path):
     global _zimage_client
     if not HF_TOKEN:
-        raise RuntimeError("HF_TOKEN is required for the free ZeroGPU image fallback")
-
+        raise RuntimeError("HF_TOKEN is required for the free ZeroGPU image generator")
     if _zimage_client is None:
         _zimage_client = Client(ZIMAGE_SPACE, token=HF_TOKEN)
 
@@ -157,26 +141,27 @@ def _generate_zimage_anchor(story, scene, index, output_path):
     action = scene.get("visual", "")
     camera = scene.get("camera", "cinematic tracking shot")
     prompt = (
-        "Premium theatrical 3D animated children's movie frame, vertical 9:16. "
-        "High-end feature-film CGI, expressive believable character, detailed materials, soft global illumination, "
-        "volumetric sunlight, rim lighting, realistic shadows, atmospheric perspective, cinematic color grading, "
-        "shallow depth of field, beautiful bokeh, natural lens perspective, rich environment detail. "
-        f"Main character: {character}. Scene: {action}. Camera: {camera}. "
-        "Keep the character cute, consistent and family-friendly. No text, no logo, no watermark. "
-        "Absolutely avoid flat vector art, sticker art, emoji style, clip-art or worksheet illustration."
-    )
-    negative = (
-        "flat vector, 2D illustration, sticker, emoji, clip-art, worksheet, simplistic geometric cartoon, "
-        "low quality, blurry, deformed anatomy, extra limbs, duplicate character, text, logo, watermark"
+        "MASTER STYLE: high-end theatrical 3D CGI feature-film render. Vertical 9:16. "
+        "This is a frame from a major studio animated movie, rendered as dimensional computer graphics. "
+        "Physically based materials, detailed soft fur, realistic skin/material response, global illumination, "
+        "volumetric god rays, cinematic rim lighting, natural 35mm lens perspective, shallow depth of field, "
+        "beautiful optical bokeh, atmospheric perspective, realistic contact shadows, detailed production design, "
+        "professional cinematic color grade, rich contrast, filmic highlights. No ink outlines and no flat fills. "
+        f"MAIN CHARACTER: {character}. SCENE: {action}. CAMERA: {camera}. "
+        "Keep the character cute, expressive, family-friendly and visually dimensional. "
+        "NO 2D, NO VECTOR, NO FLAT CARTOON, NO STICKER, NO EMOJI, NO CLIP-ART, NO WORKSHEET, "
+        "NO POSTER, NO CEL-SHADED ILLUSTRATION, NO TEXT, NO LOGO, NO WATERMARK."
     )
 
+    # Fixed-but-varied seeds make the renderer deterministic while preserving scene variation.
+    seed = 48100 + index * 97
     result = _zimage_client.predict(
         prompt,
         ZIMAGE_HEIGHT,
         ZIMAGE_WIDTH,
         ZIMAGE_STEPS,
-        1000 + index,
-        True,
+        seed,
+        False,
         api_name="/generate_image",
     )
     source = Path(extract_image_path(result))
@@ -186,7 +171,6 @@ def _generate_zimage_anchor(story, scene, index, output_path):
 
 
 def _generate_local_anchor(story, scene, index, output_path):
-    """Deterministic zero-quota fallback using the repo's existing renderer."""
     scene_image(story, scene, index, output_path)
 
 
@@ -195,7 +179,7 @@ def generate_cinematic_anchor(story, scene, index, output_path, reference_path=N
 
     if GEMINI_ENABLED and _gemini_disabled_reason is None:
         try:
-            print(f"[Scene {index + 1}/3] Trying Gemini cinematic 3D anchor...")
+            print(f"[Scene {index + 1}/3] Trying Gemini cinematic CGI anchor...")
             _generate_gemini_anchor(story, scene, output_path, reference_path)
             return "gemini"
         except Exception as exc:
@@ -206,50 +190,50 @@ def generate_cinematic_anchor(story, scene, index, output_path, reference_path=N
 
     if ZIMAGE_ENABLED and _zimage_disabled_reason is None:
         try:
-            print(f"[Scene {index + 1}/3] Generating free Z-Image-Turbo cinematic anchor...")
+            print(f"[Scene {index + 1}/3] Generating free Z-Image-Turbo cinematic CGI anchor...")
             _generate_zimage_anchor(story, scene, index, output_path)
             return "z-image-turbo"
         except Exception as exc:
             message = str(exc).replace("\n", " ")
             _zimage_disabled_reason = message[:500]
-            print("[Image fallback] Z-Image-Turbo unavailable; using deterministic local renderer.")
+            print("[Image fallback] Z-Image-Turbo unavailable.")
             print(f"[Image fallback] Z-Image reason: {message[:500]}")
 
+    if CINEMATIC_ONLY:
+        raise RuntimeError(
+            "No cinematic image provider is available. Refusing to use the legacy flat 2D renderer "
+            "because CINEMATIC_ONLY=true."
+        )
+
+    print("[WARNING] Explicit emergency mode: using legacy local 2D renderer.")
     _generate_local_anchor(story, scene, index, output_path)
-    return "local"
+    return "local-emergency"
 
 
 def make_clip(client, story, scene, index, character_reference):
     image_path = WORK / f"wan_10sec_scene_{index + 1}.png"
     clip_path = WORK / f"wan_10sec_scene_{index + 1}.mp4"
-
-    print(f"[Scene {index + 1}/3] Creating cinematic 3D anchor image...")
+    print(f"[Scene {index + 1}/3] Creating cinematic CGI anchor image...")
     reference = character_reference if index > 0 and character_reference.is_file() else None
     source_type = generate_cinematic_anchor(story, scene, index, image_path, reference)
     print(f"[Scene {index + 1}/3] Anchor ready via {source_type} renderer.")
-
     if index == 0:
         shutil.copy2(image_path, character_reference)
 
     prompt = (
-        "Premium theatrical 3D animated children's movie, cinematic film quality. "
-        "Preserve the EXACT same character identity, face, colors, clothing and proportions from the input image. "
-        f"Character: {story.get('character', 'cute cartoon animal')}. "
-        f"Scene action: {scene.get('visual', '')}. "
-        f"Camera movement: {scene.get('camera', 'smooth cinematic tracking shot')}. "
-        "Use natural physically believable motion, expressive acting, stable anatomy and face, cinematic depth, "
-        "foreground/midground/background separation, volumetric light, subtle motion blur, soft bokeh, realistic shadows, "
-        "polished feature-film rendering, warm cinematic color grade. Do not flatten the scene into a simple cartoon. "
-        "No text, subtitles, logo or watermark."
+        "Premium theatrical 3D animated feature film. Preserve EXACT character identity, face, colors, clothing and proportions. "
+        f"Character: {story.get('character', 'cute animated animal')}. Scene: {scene.get('visual', '')}. "
+        f"Camera: {scene.get('camera', 'smooth cinematic tracking shot')}. "
+        "Dimensional CGI, physically believable motion, stable anatomy and face, cinematic depth, volumetric lighting, "
+        "subtle motion blur, optical bokeh, realistic shadows, polished feature-film rendering, warm film color grade. "
+        "Do not turn the scene into a simple 2D cartoon. No text, subtitles, logo or watermark."
     )[:1100]
-
     negative_prompt = (
-        "flat vector art, 2D illustration, sticker, emoji, clip-art, worksheet style, simplistic shapes, blurry, low quality, "
-        "out of focus, distorted face, deformed body, extra limbs, missing limbs, bad anatomy, duplicate character, "
-        "character morphing, face morphing, flicker, jitter, frame tearing, unstable clothing, unstable colors, text, letters, "
-        "subtitles, logo, watermark, gray frame, noise"
+        "flat vector art, 2D illustration, sticker, emoji, clip-art, worksheet style, simplistic shapes, "
+        "flat fills, ink outlines, cel-shaded poster, blurry, low quality, distorted face, deformed body, extra limbs, "
+        "missing limbs, bad anatomy, duplicate character, character morphing, face morphing, flicker, jitter, "
+        "frame tearing, unstable clothing, unstable colors, text, letters, subtitles, logo, watermark, gray frame, noise"
     )
-
     print(f"[Scene {index + 1}/3] Generating {CLIP_SECONDS}s Wan 2.2 cinematic clip...")
     result = client.predict(
         handle_file(str(image_path)), prompt, 6, negative_prompt, CLIP_SECONDS,
