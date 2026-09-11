@@ -1,4 +1,4 @@
-name: Bytez Toon Story Test
+name: AI Toon Story - Bytez → Pixazo → Local
 
 on:
   workflow_dispatch:
@@ -8,14 +8,21 @@ on:
         required: false
         default: 'vdo/text-to-video-ms-1.7b'
       category:
-        description: 'Story category (reserved for future variants)'
-        required: false
-        default: 'toon-story'
+        description: 'Kids learning category'
+        required: true
+        default: 'numbers'
+        type: choice
+        options:
+          - numbers
+          - fruits
+          - vegetables
+          - colors
+          - animals
 
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 130
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,47 +35,89 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests google-genai edge-tts google-api-python-client google-auth pillow
+          pip install requests google-genai edge-tts google-api-python-client google-auth google-auth-oauthlib pillow gradio-client
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
 
-      - name: Generate Bytez toon story with hard fallback
+      - name: Generate with Bytez, then Pixazo V2, then local renderer
         env:
           BYTEZ_API_KEY: ${{ secrets.BYTEZ_API_KEY }}
+          PIXAZO_API_KEY: ${{ secrets.PIXAZO_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BYTEZ_VIDEO_MODEL: ${{ inputs.model }}
+          CONTENT_CATEGORY: ${{ inputs.category }}
+          PIXAZO_OUTPUT: bytez_toon_story_test.mp4
+          PIXAZO_METADATA: bytez_toon_story_metadata.json
           UPLOAD_YOUTUBE: 'false'
         run: |
           set +e
+
+          echo '========================================'
+          echo '1/3 BYTEZ T2V'
+          echo '========================================'
           python src/bytez_toon_story_test.py
           BYTEZ_EXIT=$?
-          if [ "$BYTEZ_EXIT" -eq 0 ] && [ -f bytez_toon_story_test.mp4 ]; then
-            echo "BYTEZ_RESULT=success" > bytez_result.env
+          if [ "$BYTEZ_EXIT" -eq 0 ] && [ -s bytez_toon_story_test.mp4 ]; then
+            echo 'BYTEZ_RESULT=success' > bytez_result.env
+            echo 'PROVIDER=bytez' >> bytez_result.env
+            echo '✅ Bytez generated the video successfully.'
             exit 0
           fi
 
-          echo "⚠️ Bytez T2V chain failed (exit $BYTEZ_EXIT). Starting fixed local Toon Kids fallback..."
-          echo "BYTEZ_RESULT=fallback" > bytez_result.env
+          echo "⚠️ Bytez failed (exit $BYTEZ_EXIT). Switching to the proven Pixazo Rhyme Engine V2."
+          echo '========================================'
+          echo '2/3 PIXAZO RHYME ENGINE V2'
+          echo '========================================'
+          python src/pixazo_rhyme_engine_v2.py
+          PIXAZO_EXIT=$?
+          if [ "$PIXAZO_EXIT" -eq 0 ] && [ -s bytez_toon_story_test.mp4 ]; then
+            echo 'BYTEZ_RESULT=pixazo_fallback' > bytez_result.env
+            echo 'PROVIDER=pixazo-rhyme-v2' >> bytez_result.env
+            echo 'PIXAZO_FALLBACK=true' >> bytez_result.env
+            echo '✅ Pixazo Rhyme Engine V2 generated the video successfully.'
+            exit 0
+          fi
+
+          echo "⚠️ Pixazo fallback failed (exit $PIXAZO_EXIT). Switching to fixed local Toon renderer."
+          echo '========================================'
+          echo '3/3 LOCAL TOON FALLBACK'
+          echo '========================================'
           UPLOAD_YOUTUBE=false python src/toon_kids_story_fixed.py
-          if [ ! -f toon_kids_short.mp4 ]; then
-            echo "❌ Local fallback did not produce toon_kids_short.mp4"
+          LOCAL_EXIT=$?
+          if [ "$LOCAL_EXIT" -ne 0 ] || [ ! -s toon_kids_short.mp4 ]; then
+            echo "❌ All video providers failed: Bytez=$BYTEZ_EXIT Pixazo=$PIXAZO_EXIT Local=$LOCAL_EXIT"
             exit 1
           fi
+
           cp toon_kids_short.mp4 bytez_toon_story_test.mp4
           cat > bytez_toon_story_metadata.json <<'JSON'
           {
             "provider": "local-toon-fallback-fixed",
             "bytez_failed_over": true,
+            "pixazo_failed_over": true,
             "youtube_upload": false,
             "ffmpeg_zoompan_fix": "duration-variable"
           }
           JSON
-          echo "✅ Hard fallback completed successfully"
+          echo 'BYTEZ_RESULT=local_fallback' > bytez_result.env
+          echo 'PROVIDER=local-toon-fallback-fixed' >> bytez_result.env
+          echo 'PIXAZO_FALLBACK=true' >> bytez_result.env
+          echo 'LOCAL_FALLBACK=true' >> bytez_result.env
+          echo '✅ Fixed local fallback completed successfully.'
+
+      - name: Verify final video
+        run: |
+          test -s bytez_toon_story_test.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,width,height,r_frame_rate -of default=noprint_wrappers=1 bytez_toon_story_test.mp4
+          echo '----- RESULT -----'
+          cat bytez_result.env
+          echo '----- METADATA -----'
+          cat bytez_toon_story_metadata.json
 
       - name: Upload generated video
         uses: actions/upload-artifact@v4
         with:
-          name: bytez-toon-story-test
+          name: ai-toon-story-${{ inputs.category }}
           path: |
             bytez_toon_story_test.mp4
             bytez_toon_story_metadata.json
