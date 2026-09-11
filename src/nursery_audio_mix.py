@@ -1,5 +1,7 @@
 import asyncio
 import math
+import os
+import shutil
 import subprocess
 import wave
 from pathlib import Path
@@ -7,6 +9,9 @@ from pathlib import Path
 from hf_wan_10sec_story import WORK, OUT, FINAL_SECONDS, main as video_main
 
 RATE = 48000
+AI_MUSIC_ENABLED = os.getenv("AI_MUSIC_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+AI_MUSIC_SPACE = os.getenv("AI_MUSIC_SPACE", "ACloudCenter/ACE-Music-Generator")
+AI_MUSIC_DURATION = float(os.getenv("AI_MUSIC_DURATION", "12"))
 
 
 def _tone(buf, start, duration, freq, amp=0.1, decay=1.0, harmonics=1):
@@ -61,11 +66,9 @@ def _clap(buf, start, amp=0.06):
 
 
 def make_music(path):
-    """Create a richer original nursery-pop backing track, not a simple sine demo."""
+    """Offline fallback nursery-pop backing track."""
     total = int(FINAL_SECONDS * RATE)
     buf = [0.0] * total
-
-    # Four-bar bright nursery-pop progression: C | G | Am | F.
     chords = [
         (0.0, (261.63, 329.63, 392.00)),
         (2.5, (196.00, 246.94, 293.66)),
@@ -76,50 +79,29 @@ def make_music(path):
         for note in notes:
             _tone(buf, start, 2.42, note, amp=0.035, decay=0.22, harmonics=3)
             _tone(buf, start + 0.02, 2.20, note * 2, amp=0.012, decay=0.35, harmonics=2)
-
-    # Bouncy bass line.
     bass = [130.81, 98.00, 110.00, 87.31]
     for bar, note in enumerate(bass):
         base = bar * 2.5
         for beat in range(4):
             _tone(buf, base + beat * 0.625, 0.40, note, amp=0.075, decay=0.75)
-
-    # Catchy lead melody with a bell/pluck character.
-    melody = [
-        523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 659.25,
-        698.46, 783.99, 880.00, 783.99, 698.46, 659.25, 587.33, 659.25,
-    ]
+    melody = [523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 659.25, 698.46, 783.99, 880.00, 783.99, 698.46, 659.25, 587.33, 659.25]
     for i, note in enumerate(melody):
         start = i * 0.625
         _pluck(buf, start, 0.52, note, amp=0.105)
         _tone(buf, start + 0.01, 0.28, note * 2, amp=0.014, decay=1.8, harmonics=2)
-
-    # Small answering notes to make the melody feel arranged rather than looped.
-    answers = [(1.56, 783.99), (3.43, 587.33), (5.93, 783.99), (7.81, 659.25), (9.18, 783.99)]
-    for start, note in answers:
+    for start, note in [(1.56, 783.99), (3.43, 587.33), (5.93, 783.99), (7.81, 659.25), (9.18, 783.99)]:
         _pluck(buf, start, 0.30, note, amp=0.055)
-
-    # Kid-friendly four-on-the-floor groove with off-beat hats.
     for beat in range(20):
         t = beat * 0.5
         _kick(buf, t, 0.15 if beat % 2 == 0 else 0.10)
         if beat % 2 == 1:
             _clap(buf, t, 0.075)
         _hat(buf, t + 0.25, 0.028)
-
-    # Musical sparkle hits at scene transitions.
-    for base, notes in [
-        (2.90, (1046.5, 1318.5, 1568.0)),
-        (6.40, (1174.7, 1480.0, 1760.0)),
-        (9.15, (1046.5, 1318.5, 1568.0)),
-    ]:
+    for base, notes in [(2.90, (1046.5, 1318.5, 1568.0)), (6.40, (1174.7, 1480.0, 1760.0)), (9.15, (1046.5, 1318.5, 1568.0))]:
         for j, note in enumerate(notes):
             _tone(buf, base + j * 0.075, 0.48, note, amp=0.075, decay=2.6, harmonics=2)
-
-    # Gentle ending cadence so the last second feels finished.
     for note in (523.25, 659.25, 783.99):
         _pluck(buf, 9.35, 0.58, note, amp=0.055)
-
     peak = max(1e-6, max(abs(x) for x in buf))
     gain = min(1.0, 0.78 / peak)
     with wave.open(str(path), "wb") as wf:
@@ -159,37 +141,87 @@ def make_sfx(path):
 
 async def make_voice(text, path):
     import edge_tts
-    await edge_tts.Communicate(
-        text=text,
-        voice="hi-IN-SwaraNeural",
-        rate="-8%",
-        pitch="+1Hz",
-    ).save(str(path))
+    await edge_tts.Communicate(text=text, voice="hi-IN-SwaraNeural", rate="-8%", pitch="+1Hz").save(str(path))
+
+
+def generate_ai_rhyme(rhyme, path):
+    """Generate a sung nursery rhyme through a free Hugging Face ACE-Step Space."""
+    if not AI_MUSIC_ENABLED:
+        return False
+    try:
+        from gradio_client import Client
+        token = os.getenv("HF_TOKEN") or None
+        print(f"🎼 AI music: connecting to free ACE-Step Space {AI_MUSIC_SPACE}...")
+        client = Client(AI_MUSIC_SPACE, token=token)
+        tags = (
+            "Indian Hindi nursery rhyme, preschool children's song, joyful bright major key, "
+            "catchy sing-along melody, playful child-friendly vocal, clear Hindi pronunciation, "
+            "ukulele, toy piano, marimba, glockenspiel, hand claps, light kick and percussion, "
+            "warm bass, magical bells, cute cartoon energy, simple memorable hook, upbeat 118 bpm, "
+            "clean modern kids YouTube production, no rap, no spoken narration"
+        )
+        result = client.predict(
+            AI_MUSIC_DURATION,
+            tags,
+            rhyme,
+            60,
+            15.0,
+            api_name="/generate",
+        )
+        source = result[0] if isinstance(result, (tuple, list)) else result
+        if not source:
+            raise RuntimeError("ACE-Step returned an empty audio result")
+        source_path = Path(str(source))
+        if not source_path.exists():
+            raise RuntimeError(f"ACE-Step returned a missing audio file: {source_path}")
+        shutil.copy2(source_path, path)
+        print(f"✅ AI sung rhyme created: {path}")
+        return True
+    except Exception as exc:
+        print(f"⚠️ AI music unavailable; using local fallback: {exc}")
+        return False
 
 
 def add_rhyme_audio(video, story):
     music = WORK / "nursery_music.wav"
     sfx = WORK / "nursery_sfx.wav"
     voice = WORK / "nursery_rhyme_voice.mp3"
-    make_music(music)
-    make_sfx(sfx)
+    ai_music = WORK / "nursery_ai_rhyme.mp3"
     rhyme = story.get("rhyme") or " ".join(scene.get("narration", "") for scene in story.get("scenes", [])[:3])
     if not rhyme.strip():
         raise RuntimeError("Nursery rhyme text is empty; refusing to publish a silent narration track.")
-    print("🎵 Creating full nursery soundtrack: richer music + SFX + Hindi voice...")
-    print(f"🗣️ Rhyme: {rhyme}")
-    asyncio.run(make_voice(rhyme, voice))
+
+    ai_ok = generate_ai_rhyme(rhyme, ai_music)
+    make_sfx(sfx)
+
+    if ai_ok:
+        print("🎵 Using AI-generated sung rhyme as the main soundtrack.")
+        audio_inputs = [str(ai_music), str(sfx)]
+        filter_complex = (
+            "[1:a]aresample=48000,volume=0.92[m];"
+            "[2:a]aresample=48000,volume=0.52[s];"
+            "[m][s]amix=inputs=2:duration=longest:dropout_transition=0:weights='1 0.45',"
+            "loudnorm=I=-14:TP=-1.5:LRA=9[aout]"
+        )
+    else:
+        make_music(music)
+        asyncio.run(make_voice(rhyme, voice))
+        print("🎵 Using local fallback: music + Hindi voice + SFX.")
+        audio_inputs = [str(music), str(voice), str(sfx)]
+        filter_complex = (
+            "[1:a]aresample=48000,volume=0.78[m];"
+            "[2:a]aresample=48000,acompressor=threshold=-20dB:ratio=2.2:attack=5:release=120,volume=1.18[v];"
+            "[3:a]aresample=48000,volume=0.82[s];"
+            "[m][v]sidechaincompress=threshold=0.025:ratio=3.5:attack=15:release=280[duck];"
+            "[duck][s][v]amix=inputs=3:duration=longest:dropout_transition=0:weights='1 0.9 1.3',"
+            "loudnorm=I=-14:TP=-1.5:LRA=9[aout]"
+        )
+
     out = OUT.with_name(OUT.stem + "_av.mp4")
-    filter_complex = (
-        "[1:a]aresample=48000,volume=0.78[m];"
-        "[2:a]aresample=48000,acompressor=threshold=-20dB:ratio=2.2:attack=5:release=120,volume=1.18[v];"
-        "[3:a]aresample=48000,volume=0.82[s];"
-        "[m][v]sidechaincompress=threshold=0.025:ratio=3.5:attack=15:release=280[duck];"
-        "[duck][s][v]amix=inputs=3:duration=longest:dropout_transition=0:weights='1 0.9 1.3',"
-        "loudnorm=I=-14:TP=-1.5:LRA=9[aout]"
-    )
-    cmd = [
-        "ffmpeg", "-y", "-i", str(video), "-i", str(music), "-i", str(voice), "-i", str(sfx),
+    cmd = ["ffmpeg", "-y", "-i", str(video)]
+    for audio in audio_inputs:
+        cmd += ["-i", audio]
+    cmd += [
         "-filter_complex", filter_complex,
         "-map", "0:v", "-map", "[aout]", "-t", str(FINAL_SECONDS),
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
