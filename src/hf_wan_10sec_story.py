@@ -9,12 +9,12 @@ from toon_kids_story import WORK, local_story, load_history
 from nursery_rhyme import local_rhyme
 
 # Wan 2.2 14B Text-to-Video ZeroGPU Space.
-# This is intentionally T2V: no Gemini, Z-Image, or other image model is required.
+# No Gemini, Z-Image, or any other image model is used.
 SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 CONTENT_MODE = os.getenv("CONTENT_MODE", "story").lower()
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_10sec_story.mp4"))
-CLIP_SECONDS = 3.5
+CLIP_SECONDS = 5.0
 FINAL_SECONDS = 10.0
 WAN_STEPS = int(os.getenv("WAN_STEPS", "4"))
 WAN_GUIDANCE = float(os.getenv("WAN_GUIDANCE", "1.0"))
@@ -48,9 +48,9 @@ def make_clip(client, story, scene, index):
     prompt = (
         "Premium theatrical 3D CGI children's musical feature film, high-end dimensional animation. "
         f"MAIN CHARACTER: {character}. "
-        f"STORY ACTION: {scene.get('visual', '')}. "
+        f"STORY BEAT: {scene.get('visual', '')}. "
         f"CAMERA: {scene.get('camera', 'smooth cinematic tracking shot')}. "
-        "Make the same main character visually consistent within this shot: same face, colors, clothing, "
+        "Keep the main character visually consistent throughout this shot: same face, colors, clothing, "
         "body proportions and recognizable design. Cute expressive face, polished physically based CGI, "
         "detailed materials/fur, volumetric lighting, cinematic rim light, realistic contact shadows, "
         "depth of field, optical bokeh, atmospheric perspective, filmic color grading. "
@@ -65,7 +65,7 @@ def make_clip(client, story, scene, index):
         "flicker, jitter, frame tearing, unstable colors, text, subtitles, logo, watermark, gray frame, noise"
     )
 
-    print(f"[Scene {index + 1}/3] Generating {CLIP_SECONDS}s Wan 2.2 T2V cinematic clip...")
+    print(f"[Wan 2.2] Scene {index + 1}/2: generating {CLIP_SECONDS}s T2V clip...")
     print(f"[Wan 2.2] Space: {SPACE} | steps={WAN_STEPS} | guidance={WAN_GUIDANCE}/{WAN_GUIDANCE_2}")
     result = client.predict(
         prompt,
@@ -98,6 +98,11 @@ def concat_and_trim(clips):
     subprocess.run(cmd, check=True)
 
 
+def _is_quota_error(exc):
+    text = str(exc).lower()
+    return any(term in text for term in ("zerogpu quota", "quota exceeded", "0s left", "no gpu was available"))
+
+
 def main():
     WORK.mkdir(exist_ok=True)
     history = load_history()
@@ -107,14 +112,40 @@ def main():
     if len(scenes) < 3:
         raise RuntimeError("The selected content must contain at least 3 scenes.")
 
+    # Two 5-second Wan generations keep the final video at exactly 10 seconds while
+    # staying within the current Free/anonymous ZeroGPU budget much better than 3 calls.
+    wan_scenes = [
+        {
+            "visual": f"FIRST BEAT: {scenes[0].get('visual', '')} Then naturally continue into SECOND BEAT: {scenes[1].get('visual', '')}",
+            "camera": f"{scenes[0].get('camera', 'wide cinematic establishing shot')}, then smoothly transition into {scenes[1].get('camera', 'gentle tracking shot')}",
+        },
+        {
+            "visual": scenes[2].get("visual", "joyful final nursery-rhyme moment"),
+            "camera": scenes[2].get("camera", "smooth cinematic closing shot"),
+        },
+    ]
+
     print(f"Content mode: {CONTENT_MODE}")
     print(f"Title: {story['title']}")
-    print("Plan: 3 Wan 2.2 T2V scenes x 3.5s, exact 10s final video.")
+    print("Plan: 2 Wan 2.2 T2V scenes x 5s = exact 10s final video.")
     print(f"HF_TOKEN configured: {'yes' if HF_TOKEN else 'no (anonymous ZeroGPU)'}")
     print("Video engine: Wan 2.2 14B T2V only — no Z-Image/Gemini image generation.")
 
     client = Client(SPACE, token=HF_TOKEN) if HF_TOKEN else Client(SPACE)
-    clips = [make_clip(client, story, scene, i) for i, scene in enumerate(scenes)]
+    clips = []
+    for index, scene in enumerate(wan_scenes):
+        try:
+            clips.append(make_clip(client, story, scene, index))
+        except Exception as exc:
+            # The current run showed the authenticated account at 0s quota. Retry once
+            # without the token so the request can use HF's anonymous shared ZeroGPU pool.
+            if HF_TOKEN and _is_quota_error(exc):
+                print("[Wan 2.2 fallback] Authenticated ZeroGPU quota exhausted; retrying anonymously.")
+                client = Client(SPACE)
+                clips.append(make_clip(client, story, scene, index))
+            else:
+                raise
+
     concat_and_trim(clips)
 
     # nursery_audio_mix.py monkey-patches this function with the full soundtrack mixer.
