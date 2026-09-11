@@ -8,15 +8,21 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
-from toon_kids_story import WORK, local_story, load_history
+from toon_kids_story import WORK, local_story, load_history, scene_image
 
 SPACE = os.getenv("HF_WAN_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or None
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
+GEMINI_ENABLED = os.getenv("GEMINI_IMAGE_ENABLED", "true").lower() == "true"
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_10sec_story.mp4"))
 CLIP_SECONDS = 3.5
 FINAL_SECONDS = 10.0
+
+# Runtime circuit breaker: image-generation quota failures are not retried for
+# every scene. Once Gemini returns a hard quota/configuration error, the
+# pipeline immediately switches to the deterministic local anchor renderer.
+_gemini_disabled_reason = None
 
 
 def extract_video_path(result):
@@ -40,9 +46,9 @@ def extract_video_path(result):
     raise RuntimeError(f"Unsupported HF result: {result!r}")
 
 
-def generate_cinematic_anchor(story, scene, index, output_path, reference_path=None):
+def _generate_gemini_anchor(story, scene, output_path, reference_path=None):
     if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is required for the cinematic anchor pipeline.")
+        raise RuntimeError("GEMINI_API_KEY is not configured")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     character = story.get("character", "cute cartoon animal")
@@ -78,22 +84,23 @@ No borders or UI elements.
 
     contents = [prompt]
     if reference_path and reference_path.is_file():
-        contents.append(Image.open(reference_path))
+        with Image.open(reference_path) as reference_image:
+            contents.append(reference_image.copy())
         contents.append(
             "Use the supplied reference image ONLY to preserve the main character's identity, face, "
             "colors, clothing and proportions. Redesign the scene as a premium cinematic 3D film frame; "
             "do not copy the flat/vector rendering style of the reference."
         )
 
-    # google-genai 2.x exposes image generation settings through image_config.
-    # response_format is a legacy/REST-style shape and is rejected by the current
-    # GenerateContentConfig Pydantic model used by the GitHub Actions environment.
     config = types.GenerateContentConfig(
         response_modalities=["IMAGE"],
         image_config=types.ImageConfig(
             aspect_ratio="9:16",
             image_size="2K",
         ),
+        # This pipeline does not use tools/functions. Explicitly disable AFC
+        # so the SDK cannot enter an unnecessary automatic tool-calling path.
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
     response = client.models.generate_content(
@@ -106,7 +113,32 @@ No borders or UI elements.
         if part.inline_data is not None:
             part.as_image().save(output_path)
             return
-    raise RuntimeError("Gemini image generation returned no image data.")
+    raise RuntimeError("Gemini image generation returned no image data")
+
+
+def _generate_local_anchor(story, scene, index, output_path):
+    """Deterministic zero-quota fallback using the repo's existing scene renderer."""
+    scene_image(story, scene, index, output_path)
+
+
+def generate_cinematic_anchor(story, scene, index, output_path, reference_path=None):
+    global _gemini_disabled_reason
+
+    if GEMINI_ENABLED and _gemini_disabled_reason is None:
+        try:
+            print(f"[Scene {index + 1}/3] Trying Gemini cinematic 3D anchor...")
+            _generate_gemini_anchor(story, scene, output_path, reference_path)
+            return "gemini"
+        except Exception as exc:
+            # A 429 quota=0 is permanent for the current free-tier project;
+            # do not burn time retrying the same request for scenes 2 and 3.
+            message = str(exc).replace("\n", " ")
+            _gemini_disabled_reason = message[:500]
+            print("[Image fallback] Gemini unavailable; switching to local anchor renderer.")
+            print(f"[Image fallback] Reason: {message[:500]}")
+
+    _generate_local_anchor(story, scene, index, output_path)
+    return "local"
 
 
 def make_clip(client, story, scene, index, character_reference):
@@ -115,7 +147,9 @@ def make_clip(client, story, scene, index, character_reference):
 
     print(f"[Scene {index + 1}/3] Creating cinematic 3D anchor image...")
     reference = character_reference if index > 0 and character_reference.is_file() else None
-    generate_cinematic_anchor(story, scene, index, image_path, reference)
+    source_type = generate_cinematic_anchor(story, scene, index, image_path, reference)
+    print(f"[Scene {index + 1}/3] Anchor ready via {source_type} renderer.")
+
     if index == 0:
         shutil.copy2(image_path, character_reference)
 
