@@ -85,13 +85,21 @@ No borders or UI elements.
             "do not copy the flat/vector rendering style of the reference."
         )
 
+    # google-genai 2.x exposes image generation settings through image_config.
+    # response_format is a legacy/REST-style shape and is rejected by the current
+    # GenerateContentConfig Pydantic model used by the GitHub Actions environment.
+    config = types.GenerateContentConfig(
+        response_modalities=["IMAGE"],
+        image_config=types.ImageConfig(
+            aspect_ratio="9:16",
+            image_size="2K",
+        ),
+    )
+
     response = client.models.generate_content(
         model=GEMINI_IMAGE_MODEL,
         contents=contents,
-        config=types.GenerateContentConfig(
-            response_modalities=["IMAGE"],
-            response_format={"image": {"aspect_ratio": "9:16", "image_size": "2K"}},
-        ),
+        config=config,
     )
 
     for part in response.parts:
