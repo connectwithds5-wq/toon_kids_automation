@@ -6,7 +6,7 @@ on:
       model:
         description: 'Bytez text-to-video model'
         required: false
-        default: 'ali-vilab/text-to-video-ms-1.7b'
+        default: 'Wan-AI/Wan2.1-T2V-1.3B'
       category:
         description: 'Story category (reserved for future variants)'
         required: false
