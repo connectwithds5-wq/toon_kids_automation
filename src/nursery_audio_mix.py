@@ -147,16 +147,50 @@ async def make_voice(text, path):
 
 
 def _quota_safe_anchor(story, scene, index, output_path, reference_path=None):
-    """Generate one cinematic anchor only; reuse it for all Wan scenes."""
+    """Use one anchor per run; retry anonymous ZeroGPU if authenticated quota is exhausted."""
     global _anchor_cache
+    import hf_wan_10sec_story as pipeline
+
     if _anchor_cache is not None and _anchor_cache.is_file():
         shutil.copy2(_anchor_cache, output_path)
         print(f"[Scene {index + 1}/3] Reusing Scene 1 cinematic anchor (ZeroGPU quota-safe).")
         return "scene-1-anchor-reuse"
-    source_type = _original_anchor(story, scene, index, output_path, reference_path)
-    _anchor_cache = Path(output_path)
-    print(f"[Anchor] Locked cinematic identity from Scene {index + 1}: {source_type}")
-    return source_type
+
+    try:
+        source_type = _original_anchor(story, scene, index, output_path, reference_path)
+        _anchor_cache = Path(output_path)
+        print(f"[Anchor] Locked cinematic identity from Scene {index + 1}: {source_type}")
+        return source_type
+    except Exception as authenticated_exc:
+        message = str(authenticated_exc).replace("\n", " ")
+        print(f"[Anchor fallback] Authenticated image generation failed: {message[:400]}")
+        print("[Anchor fallback] Retrying Z-Image-Turbo anonymously to avoid consuming the same account quota.")
+
+        if not pipeline.ZIMAGE_ENABLED:
+            raise
+
+        # The original provider factory prefers HF_TOKEN. Temporarily force an
+        # anonymous client and call the low-level generator directly so its
+        # account-quota failure does not permanently disable the provider.
+        old_token = pipeline.HF_TOKEN
+        old_client = pipeline._zimage_client
+        try:
+            pipeline.HF_TOKEN = None
+            pipeline._zimage_client = None
+            pipeline._generate_zimage_anchor(story, scene, index, output_path)
+            source_type = "z-image-turbo-anonymous"
+            _anchor_cache = Path(output_path)
+            print("[Anchor fallback] Anonymous Z-Image-Turbo anchor ready.")
+            return source_type
+        except Exception as anonymous_exc:
+            anon_message = str(anonymous_exc).replace("\n", " ")
+            print(f"[Anchor fallback] Anonymous Z-Image-Turbo also failed: {anon_message[:400]}")
+            raise RuntimeError(
+                "No cinematic image provider is available. Authenticated and anonymous Z-Image-Turbo both failed."
+            ) from anonymous_exc
+        finally:
+            pipeline.HF_TOKEN = old_token
+            pipeline._zimage_client = old_client
 
 
 def add_rhyme_audio(video, story):
@@ -189,15 +223,6 @@ def add_rhyme_audio(video, story):
     ]
     subprocess.run(cmd, check=True)
     out.replace(video)
-
-
-if __name__ == "main__":
-    import hf_wan_10sec_story as pipeline
-    _original_anchor = pipeline.generate_cinematic_anchor
-    pipeline.generate_cinematic_anchor = _quota_safe_anchor
-    pipeline.add_rhyme_audio = add_rhyme_audio
-    pipeline.make_voice = make_voice
-    video_main()
 
 
 if __name__ == "__main__":
