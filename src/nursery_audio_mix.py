@@ -1,6 +1,5 @@
 import asyncio
 import math
-import shutil
 import subprocess
 import wave
 from pathlib import Path
@@ -8,8 +7,6 @@ from pathlib import Path
 from hf_wan_10sec_story import WORK, OUT, FINAL_SECONDS, main as video_main
 
 RATE = 48000
-_anchor_cache = None
-_original_anchor = None
 
 
 def _tone(buf, start, duration, freq, amp=0.1, decay=1.0, harmonics=1):
@@ -63,8 +60,21 @@ def _clap(buf, start, amp=0.06):
     _hat(buf, start + 0.018, amp * 0.65)
 
 
+def _write_wav(path, buf):
+    peak = max(1e-6, max(abs(x) for x in buf))
+    gain = min(1.0, 0.78 / peak)
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(RATE)
+        wf.writeframes(b"".join(
+            int(max(-1.0, min(1.0, x * gain)) * 32767).to_bytes(2, "little", signed=True)
+            for x in buf
+        ))
+
+
 def make_music(path):
-    """Create a richer original nursery-pop backing track."""
+    """Original nursery-pop backing track: chords, bass, melody and groove."""
     total = int(FINAL_SECONDS * RATE)
     buf = [0.0] * total
     chords = [
@@ -104,13 +114,7 @@ def make_music(path):
             _tone(buf, base + j * 0.075, 0.48, note, amp=0.075, decay=2.6, harmonics=2)
     for note in (523.25, 659.25, 783.99):
         _pluck(buf, 9.35, 0.58, note, amp=0.055)
-    peak = max(1e-6, max(abs(x) for x in buf))
-    gain = min(1.0, 0.78 / peak)
-    with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(RATE)
-        wf.writeframes(b"".join(int(max(-1.0, min(1.0, x * gain)) * 32767).to_bytes(2, "little", signed=True) for x in buf))
+    _write_wav(path, buf)
 
 
 def make_sfx(path):
@@ -132,65 +136,17 @@ def make_sfx(path):
             freq = 500 + 1800 * t / 0.28
             env = math.sin(math.pi * t / 0.28) ** 1.5
             buf[i] += 0.06 * math.sin(2 * math.pi * freq * t) * env
-    peak = max(1e-6, max(abs(x) for x in buf))
-    gain = min(1.0, 0.70 / peak)
-    with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(RATE)
-        wf.writeframes(b"".join(int(max(-1.0, min(1.0, x * gain)) * 32767).to_bytes(2, "little", signed=True) for x in buf))
+    _write_wav(path, buf)
 
 
 async def make_voice(text, path):
     import edge_tts
-    await edge_tts.Communicate(text=text, voice="hi-IN-SwaraNeural", rate="-8%", pitch="+1Hz").save(str(path))
-
-
-def _quota_safe_anchor(story, scene, index, output_path, reference_path=None):
-    """Use one anchor per run; retry anonymous ZeroGPU if authenticated quota is exhausted."""
-    global _anchor_cache
-    import hf_wan_10sec_story as pipeline
-
-    if _anchor_cache is not None and _anchor_cache.is_file():
-        shutil.copy2(_anchor_cache, output_path)
-        print(f"[Scene {index + 1}/3] Reusing Scene 1 cinematic anchor (ZeroGPU quota-safe).")
-        return "scene-1-anchor-reuse"
-
-    try:
-        source_type = _original_anchor(story, scene, index, output_path, reference_path)
-        _anchor_cache = Path(output_path)
-        print(f"[Anchor] Locked cinematic identity from Scene {index + 1}: {source_type}")
-        return source_type
-    except Exception as authenticated_exc:
-        message = str(authenticated_exc).replace("\n", " ")
-        print(f"[Anchor fallback] Authenticated image generation failed: {message[:400]}")
-        print("[Anchor fallback] Retrying Z-Image-Turbo anonymously to avoid consuming the same account quota.")
-
-        if not pipeline.ZIMAGE_ENABLED:
-            raise
-
-        # The original provider factory prefers HF_TOKEN. Temporarily force an
-        # anonymous client and call the low-level generator directly so its
-        # account-quota failure does not permanently disable the provider.
-        old_token = pipeline.HF_TOKEN
-        old_client = pipeline._zimage_client
-        try:
-            pipeline.HF_TOKEN = None
-            pipeline._zimage_client = None
-            pipeline._generate_zimage_anchor(story, scene, index, output_path)
-            source_type = "z-image-turbo-anonymous"
-            _anchor_cache = Path(output_path)
-            print("[Anchor fallback] Anonymous Z-Image-Turbo anchor ready.")
-            return source_type
-        except Exception as anonymous_exc:
-            anon_message = str(anonymous_exc).replace("\n", " ")
-            print(f"[Anchor fallback] Anonymous Z-Image-Turbo also failed: {anon_message[:400]}")
-            raise RuntimeError(
-                "No cinematic image provider is available. Authenticated and anonymous Z-Image-Turbo both failed."
-            ) from anonymous_exc
-        finally:
-            pipeline.HF_TOKEN = old_token
-            pipeline._zimage_client = old_client
+    await edge_tts.Communicate(
+        text=text,
+        voice="hi-IN-SwaraNeural",
+        rate="-8%",
+        pitch="+1Hz",
+    ).save(str(path))
 
 
 def add_rhyme_audio(video, story):
@@ -199,12 +155,15 @@ def add_rhyme_audio(video, story):
     voice = WORK / "nursery_rhyme_voice.mp3"
     make_music(music)
     make_sfx(sfx)
-    rhyme = story.get("rhyme") or " ".join(scene.get("narration", "") for scene in story.get("scenes", [])[:3])
+    rhyme = story.get("rhyme") or " ".join(
+        scene.get("narration", "") for scene in story.get("scenes", [])[:3]
+    )
     if not rhyme.strip():
         raise RuntimeError("Nursery rhyme text is empty; refusing to publish a silent narration track.")
-    print("🎵 Creating full nursery soundtrack: richer music + SFX + Hindi voice...")
+    print("🎵 Creating nursery soundtrack: music + SFX + Hindi voice...")
     print(f"🗣️ Rhyme: {rhyme}")
     asyncio.run(make_voice(rhyme, voice))
+
     out = OUT.with_name(OUT.stem + "_av.mp4")
     filter_complex = (
         "[1:a]aresample=48000,volume=0.78[m];"
@@ -227,8 +186,5 @@ def add_rhyme_audio(video, story):
 
 if __name__ == "__main__":
     import hf_wan_10sec_story as pipeline
-    _original_anchor = pipeline.generate_cinematic_anchor
-    pipeline.generate_cinematic_anchor = _quota_safe_anchor
     pipeline.add_rhyme_audio = add_rhyme_audio
-    pipeline.make_voice = make_voice
     video_main()
