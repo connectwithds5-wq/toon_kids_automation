@@ -15,14 +15,20 @@ HF_TOKEN = os.getenv("HF_TOKEN") or None
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or None
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
 GEMINI_ENABLED = os.getenv("GEMINI_IMAGE_ENABLED", "true").lower() == "true"
+ZIMAGE_SPACE = os.getenv("ZIMAGE_SPACE", "mrfakename/Z-Image-Turbo")
+ZIMAGE_ENABLED = os.getenv("ZIMAGE_ENABLED", "true").lower() == "true"
+ZIMAGE_WIDTH = int(os.getenv("ZIMAGE_WIDTH", "864"))
+ZIMAGE_HEIGHT = int(os.getenv("ZIMAGE_HEIGHT", "1536"))
+ZIMAGE_STEPS = int(os.getenv("ZIMAGE_STEPS", "9"))
 OUT = Path(os.getenv("HF_WAN_OUTPUT", "toon_wan_10sec_story.mp4"))
 CLIP_SECONDS = 3.5
 FINAL_SECONDS = 10.0
 
-# Runtime circuit breaker: image-generation quota failures are not retried for
-# every scene. Once Gemini returns a hard quota/configuration error, the
-# pipeline immediately switches to the deterministic local anchor renderer.
+# Runtime circuit breakers. Hard quota/configuration failures are not retried
+# for every scene; the next provider is selected immediately.
 _gemini_disabled_reason = None
+_zimage_disabled_reason = None
+_zimage_client = None
 
 
 def extract_video_path(result):
@@ -44,6 +50,31 @@ def extract_video_path(result):
     if isinstance(result, str) and result:
         return result
     raise RuntimeError(f"Unsupported HF result: {result!r}")
+
+
+def extract_image_path(result):
+    if isinstance(result, dict):
+        for key in ("image", "output", "file", "path"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                return value
+            try:
+                return extract_image_path(value)
+            except RuntimeError:
+                pass
+        raise RuntimeError(f"No image path in result: {result!r}")
+    if isinstance(result, (tuple, list)):
+        for item in result:
+            if isinstance(item, str) and (Path(item).is_file() or item.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))):
+                return item
+            try:
+                return extract_image_path(item)
+            except RuntimeError:
+                pass
+        raise RuntimeError(f"No image path in result: {result!r}")
+    if isinstance(result, str) and result:
+        return result
+    raise RuntimeError(f"Unsupported image result: {result!r}")
 
 
 def _generate_gemini_anchor(story, scene, output_path, reference_path=None):
@@ -98,8 +129,6 @@ No borders or UI elements.
             aspect_ratio="9:16",
             image_size="2K",
         ),
-        # This pipeline does not use tools/functions. Explicitly disable AFC
-        # so the SDK cannot enter an unnecessary automatic tool-calling path.
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
@@ -116,13 +145,53 @@ No borders or UI elements.
     raise RuntimeError("Gemini image generation returned no image data")
 
 
+def _generate_zimage_anchor(story, scene, index, output_path):
+    global _zimage_client
+    if not HF_TOKEN:
+        raise RuntimeError("HF_TOKEN is required for the free ZeroGPU image fallback")
+
+    if _zimage_client is None:
+        _zimage_client = Client(ZIMAGE_SPACE, token=HF_TOKEN)
+
+    character = story.get("character", "cute animated animal")
+    action = scene.get("visual", "")
+    camera = scene.get("camera", "cinematic tracking shot")
+    prompt = (
+        "Premium theatrical 3D animated children's movie frame, vertical 9:16. "
+        "High-end feature-film CGI, expressive believable character, detailed materials, soft global illumination, "
+        "volumetric sunlight, rim lighting, realistic shadows, atmospheric perspective, cinematic color grading, "
+        "shallow depth of field, beautiful bokeh, natural lens perspective, rich environment detail. "
+        f"Main character: {character}. Scene: {action}. Camera: {camera}. "
+        "Keep the character cute, consistent and family-friendly. No text, no logo, no watermark. "
+        "Absolutely avoid flat vector art, sticker art, emoji style, clip-art or worksheet illustration."
+    )
+    negative = (
+        "flat vector, 2D illustration, sticker, emoji, clip-art, worksheet, simplistic geometric cartoon, "
+        "low quality, blurry, deformed anatomy, extra limbs, duplicate character, text, logo, watermark"
+    )
+
+    result = _zimage_client.predict(
+        prompt,
+        ZIMAGE_HEIGHT,
+        ZIMAGE_WIDTH,
+        ZIMAGE_STEPS,
+        1000 + index,
+        True,
+        api_name="/generate_image",
+    )
+    source = Path(extract_image_path(result))
+    if not source.is_file():
+        raise FileNotFoundError(f"Z-Image output does not exist: {source}")
+    shutil.copy2(source, output_path)
+
+
 def _generate_local_anchor(story, scene, index, output_path):
-    """Deterministic zero-quota fallback using the repo's existing scene renderer."""
+    """Deterministic zero-quota fallback using the repo's existing renderer."""
     scene_image(story, scene, index, output_path)
 
 
 def generate_cinematic_anchor(story, scene, index, output_path, reference_path=None):
-    global _gemini_disabled_reason
+    global _gemini_disabled_reason, _zimage_disabled_reason
 
     if GEMINI_ENABLED and _gemini_disabled_reason is None:
         try:
@@ -130,12 +199,21 @@ def generate_cinematic_anchor(story, scene, index, output_path, reference_path=N
             _generate_gemini_anchor(story, scene, output_path, reference_path)
             return "gemini"
         except Exception as exc:
-            # A 429 quota=0 is permanent for the current free-tier project;
-            # do not burn time retrying the same request for scenes 2 and 3.
             message = str(exc).replace("\n", " ")
             _gemini_disabled_reason = message[:500]
-            print("[Image fallback] Gemini unavailable; switching to local anchor renderer.")
-            print(f"[Image fallback] Reason: {message[:500]}")
+            print("[Image fallback] Gemini unavailable; moving to free ZeroGPU image generation.")
+            print(f"[Image fallback] Gemini reason: {message[:500]}")
+
+    if ZIMAGE_ENABLED and _zimage_disabled_reason is None:
+        try:
+            print(f"[Scene {index + 1}/3] Generating free Z-Image-Turbo cinematic anchor...")
+            _generate_zimage_anchor(story, scene, index, output_path)
+            return "z-image-turbo"
+        except Exception as exc:
+            message = str(exc).replace("\n", " ")
+            _zimage_disabled_reason = message[:500]
+            print("[Image fallback] Z-Image-Turbo unavailable; using deterministic local renderer.")
+            print(f"[Image fallback] Z-Image reason: {message[:500]}")
 
     _generate_local_anchor(story, scene, index, output_path)
     return "local"
