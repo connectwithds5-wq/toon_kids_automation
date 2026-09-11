@@ -13,8 +13,8 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_WAN_SPACE: zerogpu-aoti/wan2-2-fp8da-aoti-faster
-      HF_WAN_OUTPUT: toon_wan_10sec_story_av_v2.mp4
-      INPUT_VIDEO: toon_wan_10sec_story_av_v2.mp4
+      HF_WAN_OUTPUT: toon_wan_10sec_story.mp4
+      INPUT_VIDEO: toon_wan_10sec_story.mp4
       OUTPUT_VIDEO: toon_wan_10sec_story_4k.mp4
       X264_PRESET: medium
       X264_CRF: 16
@@ -39,15 +39,15 @@ jobs:
 
       - name: Validate pipeline
         run: |
-          python -m py_compile src/hf_wan_10sec_story_av_v2.py src/toon_kids_story.py src/upscale_vertical_4k.py
+          python -m py_compile src/hf_wan_10sec_story.py src/toon_kids_story.py src/upscale_vertical_4k.py
 
       - name: Generate Toon story with Wan 2.2
-        run: python src/hf_wan_10sec_story_av_v2.py
+        run: python src/hf_wan_10sec_story.py
 
       - name: Verify Wan master
         run: |
-          test -s toon_wan_10sec_story_av_v2.mp4
-          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_wan_10sec_story_av_v2.mp4
+          test -s toon_wan_10sec_story.mp4
+          ffprobe -v error -show_entries format=duration,size -show_streams -of default=noprint_wrappers=1 toon_wan_10sec_story.mp4
 
       - name: Create 4K vertical master
         run: python src/upscale_vertical_4k.py
