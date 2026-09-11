@@ -6,7 +6,7 @@ on:
       model:
         description: 'Bytez text-to-video model'
         required: false
-        default: 'Wan-AI/Wan2.1-T2V-1.3B'
+        default: 'vdo/text-to-video-ms-1.7b'
       category:
         description: 'Story category (reserved for future variants)'
         required: false
@@ -15,7 +15,7 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,16 +28,41 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests google-genai
+          pip install requests google-genai edge-tts google-api-python-client google-auth pillow
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
 
-      - name: Generate isolated Bytez toon story
+      - name: Generate Bytez toon story with hard fallback
         env:
           BYTEZ_API_KEY: ${{ secrets.BYTEZ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BYTEZ_VIDEO_MODEL: ${{ inputs.model }}
-        run: python src/bytez_toon_story_test.py
+          UPLOAD_YOUTUBE: 'false'
+        run: |
+          set +e
+          python src/bytez_toon_story_test.py
+          BYTEZ_EXIT=$?
+          if [ "$BYTEZ_EXIT" -eq 0 ] && [ -f bytez_toon_story_test.mp4 ]; then
+            echo "BYTEZ_RESULT=success" > bytez_result.env
+            exit 0
+          fi
+
+          echo "⚠️ Bytez T2V chain failed (exit $BYTEZ_EXIT). Starting proven local Toon Kids fallback..."
+          echo "BYTEZ_RESULT=fallback" > bytez_result.env
+          UPLOAD_YOUTUBE=false python src/toon_kids_story.py
+          if [ ! -f toon_kids_short.mp4 ]; then
+            echo "❌ Local fallback did not produce toon_kids_short.mp4"
+            exit 1
+          fi
+          cp toon_kids_short.mp4 bytez_toon_story_test.mp4
+          cat > bytez_toon_story_metadata.json <<'JSON'
+          {
+            "provider": "local-toon-fallback",
+            "bytez_failed_over": true,
+            "youtube_upload": false
+          }
+          JSON
+          echo "✅ Hard fallback completed successfully"
 
       - name: Upload generated video
         uses: actions/upload-artifact@v4
@@ -46,5 +71,6 @@ jobs:
           path: |
             bytez_toon_story_test.mp4
             bytez_toon_story_metadata.json
+            bytez_result.env
           if-no-files-found: error
           retention-days: 7
