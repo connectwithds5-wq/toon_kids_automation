@@ -47,9 +47,9 @@ jobs:
             exit 0
           fi
 
-          echo "⚠️ Bytez T2V chain failed (exit $BYTEZ_EXIT). Starting proven local Toon Kids fallback..."
+          echo "⚠️ Bytez T2V chain failed (exit $BYTEZ_EXIT). Starting fixed local Toon Kids fallback..."
           echo "BYTEZ_RESULT=fallback" > bytez_result.env
-          UPLOAD_YOUTUBE=false python src/toon_kids_story.py
+          UPLOAD_YOUTUBE=false python src/toon_kids_story_fixed.py
           if [ ! -f toon_kids_short.mp4 ]; then
             echo "❌ Local fallback did not produce toon_kids_short.mp4"
             exit 1
@@ -57,9 +57,10 @@ jobs:
           cp toon_kids_short.mp4 bytez_toon_story_test.mp4
           cat > bytez_toon_story_metadata.json <<'JSON'
           {
-            "provider": "local-toon-fallback",
+            "provider": "local-toon-fallback-fixed",
             "bytez_failed_over": true,
-            "youtube_upload": false
+            "youtube_upload": false,
+            "ffmpeg_zoompan_fix": "duration-variable"
           }
           JSON
           echo "✅ Hard fallback completed successfully"
