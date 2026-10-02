@@ -18,8 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      # Gemini is OPTIONAL now. If its quota is exhausted, the Python script
-      # automatically switches to a built-in local story template.
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_TEXT_MODEL: gemini-3.5-flash-lite
       GEMINI_FALLBACK_MODEL: gemini-3.6-flash
@@ -43,6 +41,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: remotion-kids/package.json
+
       - name: Install FFmpeg and fonts
         run: |
           sudo apt-get update
@@ -53,7 +58,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install google-genai google-api-python-client google-auth google-auth-oauthlib edge-tts pillow
 
-      - name: Validate YouTube secrets
+      - name: Install Remotion dependencies
+        working-directory: remotion-kids
+        run: |
+          npm install --no-audit --no-fund
+
+      - name: Validate secrets
         shell: bash
         run: |
           test -n "$YOUTUBE_CLIENT_ID" || { echo "❌ Missing YOUTUBE_CLIENT_ID"; exit 1; }
@@ -66,37 +76,33 @@ jobs:
           fi
           echo "✅ Required YouTube secrets are present."
 
-      - name: Patch FFmpeg zoompan expression
-        run: |
-          # FFmpeg zoompan exposes the frame-count variable as `duration`, not `d`.
-          # Replace the old expression before execution so older committed script
-          # versions cannot break the run.
-          sed -i 's/(d-1)/(duration-1)/g' src/toon_kids_story.py
-          grep -n "duration-1" src/toon_kids_story.py || true
-          echo "✅ zoompan expression patched."
-
       - name: Validate Python
         run: |
           python -m py_compile src/toon_kids_story.py
+          python -m py_compile src/toon_kids_remotion_production.py
           echo "✅ Python syntax OK."
+
+      - name: Validate Remotion project
+        working-directory: remotion-kids
+        run: |
+          npx remotion compositions src/index.ts
+          echo "✅ Remotion composition detected."
 
       - name: Show configuration
         run: |
           echo "=========================================="
-          echo "TOON KIDS — FREE LOCAL ANIMATION"
+          echo "TOON KIDS — REMOTION PRODUCTION"
           echo "=========================================="
           python --version
-          ffmpeg -version | head -n 1
+          node --version
           echo "Gemini text: $GEMINI_TEXT_MODEL (optional)"
-          echo "Video generator: NONE — Pillow + FFmpeg"
-          echo "Cloudflare: DISABLED"
-          echo "Veo: DISABLED"
-          echo "Run slot: $RUN_SLOT"
+          echo "Renderer: Remotion"
+          echo "Output: 1080x1920 / 30 FPS / 56 seconds"
           echo "YouTube upload: $UPLOAD_YOUTUBE"
           echo "=========================================="
 
       - name: Generate Toon Kids Short
-        run: python src/toon_kids_story.py
+        run: python src/toon_kids_remotion_production.py
 
       - name: Verify video
         run: |
@@ -122,4 +128,5 @@ jobs:
         if: always()
         run: |
           rm -rf work
+          rm -rf remotion-kids/public/content/kids
           echo "Cleanup completed."
